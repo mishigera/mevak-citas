@@ -1,37 +1,270 @@
-import { type User, type InsertUser } from "@shared/schema";
 import { randomUUID } from "crypto";
+import bcrypt from "bcryptjs";
 
-// modify the interface with any CRUD methods
-// you might need
+export type Role = "ADMIN" | "OWNER" | "RECEPTION" | "FACIALIST";
+export type AppointmentType = "FACIAL" | "LASER";
+export type AppointmentStatus = "SCHEDULED" | "ARRIVED" | "NO_SHOW" | "DONE" | "CANCELLED";
+export type PaymentMethod = "CASH" | "CARD" | "INCLUDED";
+export type PackageStatus = "ACTIVE" | "FINISHED" | "PAUSED";
+export type Sex = "M" | "F";
 
-export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  role: Role;
+  isActive: boolean;
+  createdAt: string;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+export interface Client {
+  id: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  birthDate?: string;
+  sex?: Sex;
+  occupation?: string;
+  createdAt: string;
+}
+
+export interface ClinicalProfile {
+  id: string;
+  clientId: string;
+  allergiesFlag: boolean;
+  allergiesText?: string;
+  conditionsJson: Record<string, boolean | string>;
+  medsText?: string;
+  surgeriesText?: string;
+  phototype?: number;
+  eyeColor?: string;
+  hairColor?: string;
+}
+
+export interface Service {
+  id: string;
+  name: string;
+  type: AppointmentType;
+  price: number;
+  isActive: boolean;
+}
+
+export interface Package {
+  id: string;
+  name: string;
+  type: "LASER";
+  totalSessions: number;
+  price: number;
+  isActive: boolean;
+}
+
+export interface LaserArea {
+  id: string;
+  name: string;
+  bodySide: "front" | "back" | "both";
+  bodyRegion?: string;
+  svgKey: string;
+  isActive: boolean;
+}
+
+export interface ClientLaserSelection {
+  id: string;
+  clientId: string;
+  areaId: string;
+}
+
+export interface ClientPackage {
+  id: string;
+  clientId: string;
+  packageId: string;
+  totalSessions: number;
+  usedSessions: number;
+  remainingSessions: number;
+  startDate: string;
+  status: PackageStatus;
+}
+
+export interface Appointment {
+  id: string;
+  dateTimeStart: string;
+  dateTimeEnd: string;
+  clientId: string;
+  staffId: string;
+  type: AppointmentType;
+  status: AppointmentStatus;
+  notes?: string;
+}
+
+export interface AppointmentService {
+  id: string;
+  appointmentId: string;
+  serviceId: string;
+}
+
+export interface LaserSession {
+  id: string;
+  appointmentId: string;
+  clientPackageId?: string;
+  sessionNumber?: number;
+  areasSnapshotJson?: string[];
+  notes?: string;
+}
+
+export interface Payment {
+  id: string;
+  appointmentId: string;
+  method: PaymentMethod;
+  totalAmount: number;
+  ownerNetAmount: number;
+  facialistNetAmount: number;
+  facialistPaidFlag: boolean;
+  createdAt: string;
+}
+
+export interface AvailabilityBlock {
+  id: string;
+  userId: string;
+  startDateTime: string;
+  endDateTime: string;
+  reason?: string;
+}
+
+class MemStorage {
+  users: Map<string, User> = new Map();
+  clients: Map<string, Client> = new Map();
+  clinicalProfiles: Map<string, ClinicalProfile> = new Map();
+  services: Map<string, Service> = new Map();
+  packages: Map<string, Package> = new Map();
+  laserAreas: Map<string, LaserArea> = new Map();
+  clientLaserSelections: Map<string, ClientLaserSelection> = new Map();
+  clientPackages: Map<string, ClientPackage> = new Map();
+  appointments: Map<string, Appointment> = new Map();
+  appointmentServices: Map<string, AppointmentService> = new Map();
+  laserSessions: Map<string, LaserSession> = new Map();
+  payments: Map<string, Payment> = new Map();
+  availabilityBlocks: Map<string, AvailabilityBlock> = new Map();
 
   constructor() {
-    this.users = new Map();
+    this.seed();
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
+  private async seed() {
+    const adminHash = await bcrypt.hash("admin123", 10);
+    const ownerHash = await bcrypt.hash("owner123", 10);
+    const recepHash = await bcrypt.hash("recep123", 10);
+    const facHash = await bcrypt.hash("fac123", 10);
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
-  }
+    const admin: User = { id: randomUUID(), name: "Admin", email: "admin@beauty.com", passwordHash: adminHash, role: "ADMIN", isActive: true, createdAt: new Date().toISOString() };
+    const owner: User = { id: randomUUID(), name: "Laura (Owner)", email: "owner@beauty.com", passwordHash: ownerHash, role: "OWNER", isActive: true, createdAt: new Date().toISOString() };
+    const recep: User = { id: randomUUID(), name: "Sofia (Recep)", email: "recep@beauty.com", passwordHash: recepHash, role: "RECEPTION", isActive: true, createdAt: new Date().toISOString() };
+    const fac: User = { id: randomUUID(), name: "Valeria (Facial)", email: "fac@beauty.com", passwordHash: facHash, role: "FACIALIST", isActive: true, createdAt: new Date().toISOString() };
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+    [admin, owner, recep, fac].forEach(u => this.users.set(u.id, u));
+
+    const services: Service[] = [
+      { id: randomUUID(), name: "Limpieza Facial Profunda", type: "FACIAL", price: 600, isActive: true },
+      { id: randomUUID(), name: "Tratamiento Hidratante", type: "FACIAL", price: 500, isActive: true },
+      { id: randomUUID(), name: "Peeling Químico", type: "FACIAL", price: 800, isActive: true },
+      { id: randomUUID(), name: "Microdermoabrasión", type: "FACIAL", price: 750, isActive: true },
+      { id: randomUUID(), name: "Radiofrecuencia Facial", type: "FACIAL", price: 900, isActive: true },
+      { id: randomUUID(), name: "Sesión Láser Suelta", type: "LASER", price: 400, isActive: true },
+    ];
+    services.forEach(s => this.services.set(s.id, s));
+
+    const pkg: Package = { id: randomUUID(), name: "Paquete Láser 10 Sesiones", type: "LASER", totalSessions: 10, price: 3500, isActive: true };
+    this.packages.set(pkg.id, pkg);
+
+    const laserAreas: LaserArea[] = [
+      { id: randomUUID(), name: "Axilas", bodySide: "both", bodyRegion: "torso", svgKey: "axilas", isActive: true },
+      { id: randomUUID(), name: "Bikini Clásico", bodySide: "front", bodyRegion: "pelvis", svgKey: "bikini_clasico", isActive: true },
+      { id: randomUUID(), name: "Bikini Completo", bodySide: "front", bodyRegion: "pelvis", svgKey: "bikini_completo", isActive: true },
+      { id: randomUUID(), name: "Piernas Completas", bodySide: "both", bodyRegion: "legs", svgKey: "piernas_completas", isActive: true },
+      { id: randomUUID(), name: "Medias Piernas", bodySide: "both", bodyRegion: "legs", svgKey: "medias_piernas", isActive: true },
+      { id: randomUUID(), name: "Brazos", bodySide: "both", bodyRegion: "arms", svgKey: "brazos", isActive: true },
+      { id: randomUUID(), name: "Labio Superior", bodySide: "front", bodyRegion: "face", svgKey: "labio_superior", isActive: true },
+      { id: randomUUID(), name: "Mentón", bodySide: "front", bodyRegion: "face", svgKey: "menton", isActive: true },
+      { id: randomUUID(), name: "Espalda Alta", bodySide: "back", bodyRegion: "torso", svgKey: "espalda_alta", isActive: true },
+      { id: randomUUID(), name: "Espalda Completa", bodySide: "back", bodyRegion: "torso", svgKey: "espalda_completa", isActive: true },
+      { id: randomUUID(), name: "Abdomen", bodySide: "front", bodyRegion: "torso", svgKey: "abdomen", isActive: true },
+      { id: randomUUID(), name: "Glúteos", bodySide: "back", bodyRegion: "pelvis", svgKey: "gluteos", isActive: true },
+    ];
+    laserAreas.forEach(a => this.laserAreas.set(a.id, a));
+
+    const clients: Client[] = [
+      { id: randomUUID(), fullName: "María García", phone: "555-1234", email: "maria@example.com", birthDate: "1990-05-15", sex: "F", occupation: "Maestra", createdAt: new Date().toISOString() },
+      { id: randomUUID(), fullName: "Ana López", phone: "555-5678", email: "ana@example.com", birthDate: "1985-08-22", sex: "F", createdAt: new Date().toISOString() },
+      { id: randomUUID(), fullName: "Carolina Martínez", phone: "555-9012", birthDate: "1995-03-10", sex: "F", occupation: "Médico", createdAt: new Date().toISOString() },
+    ];
+    clients.forEach(c => this.clients.set(c.id, c));
+
+    const today = new Date();
+    const todayStr = today.toISOString().split("T")[0];
+
+    const appt1: Appointment = {
+      id: randomUUID(),
+      dateTimeStart: `${todayStr}T09:00:00.000Z`,
+      dateTimeEnd: `${todayStr}T10:00:00.000Z`,
+      clientId: clients[0].id,
+      staffId: fac.id,
+      type: "FACIAL",
+      status: "SCHEDULED",
+      notes: "Acné en frente",
+    };
+    const appt2: Appointment = {
+      id: randomUUID(),
+      dateTimeStart: `${todayStr}T11:00:00.000Z`,
+      dateTimeEnd: `${todayStr}T12:00:00.000Z`,
+      clientId: clients[1].id,
+      staffId: owner.id,
+      type: "LASER",
+      status: "SCHEDULED",
+    };
+    const appt3: Appointment = {
+      id: randomUUID(),
+      dateTimeStart: `${todayStr}T13:00:00.000Z`,
+      dateTimeEnd: `${todayStr}T14:00:00.000Z`,
+      clientId: clients[2].id,
+      staffId: fac.id,
+      type: "FACIAL",
+      status: "ARRIVED",
+    };
+    [appt1, appt2, appt3].forEach(a => this.appointments.set(a.id, a));
+
+    const appSvc1: AppointmentService = { id: randomUUID(), appointmentId: appt1.id, serviceId: services[0].id };
+    this.appointmentServices.set(appSvc1.id, appSvc1);
+
+    const cp: ClientPackage = {
+      id: randomUUID(),
+      clientId: clients[1].id,
+      packageId: pkg.id,
+      totalSessions: 10,
+      usedSessions: 3,
+      remainingSessions: 7,
+      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      status: "ACTIVE",
+    };
+    this.clientPackages.set(cp.id, cp);
+
+    const ls: LaserSession = {
+      id: randomUUID(),
+      appointmentId: appt2.id,
+      clientPackageId: cp.id,
+      sessionNumber: 4,
+      areasSnapshotJson: [laserAreas[0].svgKey, laserAreas[3].svgKey],
+    };
+    this.laserSessions.set(ls.id, ls);
+
+    const clinical: ClinicalProfile = {
+      id: randomUUID(),
+      clientId: clients[1].id,
+      allergiesFlag: false,
+      conditionsJson: { diabetes: false, hipertension: true, renales: false, cardiacas: false, circulatorias: false, digestivas: false, pulmonares: false, endocrinas: false, neurologicas: false, hematologicas: false, dermatologicas: false, otrosText: "" },
+      phototype: 2,
+      eyeColor: "café",
+      hairColor: "negro",
+    };
+    this.clinicalProfiles.set(clinical.id, clinical);
   }
 }
 
