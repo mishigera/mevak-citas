@@ -1,0 +1,166 @@
+Actúa como arquitecto y desarrollador full-stack. Construye un MVP de una PWA móvil (iPhone-first) para un Beauty Center con agenda, clientes, historia clínica (láser), selección de fototipo, control de paquetes, pagos y bloqueos de disponibilidad por staff.
+
+STACK:
+- Frontend: Next.js (App Router) + TypeScript + TailwindCSS + PWA (next-pwa o config manual)
+- Backend: Next.js API routes o Server Actions
+- DB: SQLite para MVP (migrable a Postgres)
+- ORM: Prisma
+- Auth: NextAuth Credentials (email+password) con roles y middleware de autorización
+- UI: diseño móvil, botones grandes, navegación simple
+
+ROLES:
+1) ADMIN:
+   - CRUD usuarios y roles
+   - CRUD catálogo de servicios y paquetes (precios)
+   - Reportes (ingresos por mes, neto owner, pagos facialista)
+2) OWNER (propietaria / laserista):
+   - Ver calendario completo + citas del día
+   - Agendar/editar citas
+   - Crear bloqueos de disponibilidad propios (días/horas inhabilitadas)
+   - Abrir cita láser: marcar llegó/no llegó, ver historial, tomar notas, terminar y registrar pago (efectivo/tarjeta/incluido)
+   - Control de paquetes (sesión X/total)
+   - Ver y liquidar pagos pendientes a facialista (marcar “pagado”)
+3) RECEPCIONISTA:
+   - Ver calendario completo y agenda
+   - Crear/editar citas
+   - Crear clientes
+   - NO puede ver datos clínicos (ClinicalProfile)
+   - NO puede editar servicios/paquetes
+4) FACIALISTA:
+   - Ver calendario completo + citas del día
+   - Agendar/editar citas
+   - Crear bloqueos de disponibilidad propios (días/horas inhabilitadas)
+   - Abrir cita facial: iniciar, elegir servicio facial (botones grandes dinámicos desde BD), notas, terminar y registrar pago (cash/card)
+   - Marcar “ya me pagaron” (esto alimenta la lista de pendientes del Owner)
+
+ENTIDADES (Prisma):
+- User { id, name, email UNIQUE, passwordHash, role('ADMIN'|'OWNER'|'RECEPTION'|'FACIALIST'), isActive, createdAt }
+- Client { id, fullName, phone, email?, birthDate?, sex('M'|'F')?, occupation?, createdAt }
+
+HISTORIA CLÍNICA (para láser):
+- ClinicalProfile {
+    id,
+    clientId UNIQUE,
+    allergiesFlag BOOLEAN,
+    allergiesText STRING?,
+    conditionsJson JSON,          // checkboxes: diabetes, hipertension, renales, cardiacas, circulatorias, digestivas, pulmonares, endocrinas, neurologicas, hematologicas, dermatologicas, otrosText
+    medsText STRING?,
+    surgeriesText STRING?,
+    phototype INT (1-6),          // SELECCIÓN UI tipo tarjetas
+    eyeColor STRING?,             // opcional
+    hairColor STRING?             // opcional
+  }
+
+CATÁLOGOS:
+- Service { id, name, type('FACIAL'|'LASER'), price INT, isActive BOOLEAN }
+- Package { id, name, type('LASER'), totalSessions INT, price INT, isActive BOOLEAN }
+
+DEPILACIÓN POR ÁREAS (catálogo + selección visual):
+- LaserArea { id, name, bodySide('front'|'back'|'both'), bodyRegion STRING?, svgKey STRING UNIQUE, isActive BOOLEAN }
+- ClientLaserSelection { id, clientId, areaId } // many-to-many
+
+PAQUETES:
+- ClientPackage { id, clientId, packageId, totalSessions, usedSessions, remainingSessions, startDate, status('ACTIVE'|'FINISHED'|'PAUSED') }
+
+AGENDA:
+- Appointment {
+    id,
+    dateTimeStart,
+    dateTimeEnd,
+    clientId,
+    staffId,                      // user (owner o facialista)
+    type('FACIAL'|'LASER'),
+    status('SCHEDULED'|'ARRIVED'|'NO_SHOW'|'DONE'|'CANCELLED'),
+    notes?
+  }
+
+- AppointmentService { id, appointmentId, serviceId }  // para facial: selección dinámica
+- LaserSession {
+    id,
+    appointmentId UNIQUE,
+    clientPackageId?,             // si fue con paquete
+    sessionNumber INT?,           // 3/10 etc (si aplica)
+    areasSnapshotJson JSON?,      // snapshot de áreas tratadas ese día (por si cambian después)
+    notes?
+  }
+
+PAGOS:
+- Payment {
+    id,
+    appointmentId UNIQUE,
+    method('CASH'|'CARD'|'INCLUDED'),
+    totalAmount INT,
+    ownerNetAmount INT,           // para faciales: 50% del total
+    facialistNetAmount INT,       // para faciales: 50% del total
+    facialistPaidFlag BOOLEAN,    // para que Owner vea pendientes
+    createdAt
+  }
+
+DISPONIBILIDAD / BLOQUEOS:
+- AvailabilityBlock {
+    id,
+    userId,                       // owner o facialista (y admin si quieres)
+    startDateTime,
+    endDateTime,
+    reason STRING?                // "vacaciones", "no trabajo sábados", etc.
+  }
+
+REGLAS DE NEGOCIO CLAVE:
+- Todos (ADMIN/OWNER/RECEPTION/FACIALIST) pueden crear/editar citas.
+- OWNER y FACIALIST pueden crear sus propios AvailabilityBlock.
+- Al crear/editar cita validar:
+  - no empalme con otra cita del mismo staff
+  - no caiga dentro de un AvailabilityBlock del staff
+- Recepcionista NO puede ver ni editar ClinicalProfile.
+- Para FACIAL:
+  - el facialista gana 50% del precio del servicio
+  - OwnerNet = 50%
+  - Payment registra facialistPaidFlag para controlar pagos pendientes
+- Para LASER:
+  - Si usa paquete: Payment.method = INCLUDED y totalAmount = 0
+  - Si es sesión suelta: method CASH/CARD, totalAmount = precio configurado (o capturable)
+  - Mostrar progreso paquete: usedSessions/totalSessions y autoincrementar al cerrar cita (LaserSession.sessionNumber)
+
+PANTALLAS:
+- Login
+- Calendario (vista día/semana simple, lista por horas) visible para OWNER/FACIALIST/RECEPTION/ADMIN
+- Home (citas de hoy)
+- Crear/Editar cita (con validaciones de choque y bloqueos)
+- Bloqueos: listar + crear bloqueos (OWNER/FACIALIST)
+- Clientes: buscar, crear, detalle
+- Cliente detalle:
+  - pestaña Resumen
+  - pestaña Faciales (historial)
+  - pestaña Láser (historial, paquetes, áreas)
+  - pestaña Historia clínica (solo roles autorizados)
+- Cita detalle FACIAL:
+  - botón “Iniciar”
+  - selección servicio facial con botones grandes (desde BD)
+  - notas
+  - botón “Terminar”
+  - pago (cash/card)
+  - toggle “ya me pagaron”
+- Cita detalle LASER:
+  - mostrar paquete (3/10) si aplica
+  - historial de sesiones
+  - selección/visualización de áreas (monito SVG) y snapshot en sesión
+  - notas
+  - terminar + pago (cash/card/included)
+
+COMPONENTE UI: FOTOTIPO 1–6
+- En Historia clínica y/o al iniciar un tratamiento láser:
+  - mostrar 6 tarjetas “Tipo 1” … “Tipo 6”
+  - al tocar, seleccionar y guardar phototype
+  - mostrar seleccionado con borde/estado
+  - (opcional) permitir eyeColor/hairColor con select simple
+
+COMPONENTE ESPECIAL: MONITO DE ÁREAS (SVG)
+- SVG minimal con front/back y paths por zona con id = svgKey
+- tap toggles selección y cambia fill
+- guardar en ClientLaserSelection
+- al terminar cita láser guardar snapshot en LaserSession.areasSnapshotJson
+
+ENTREGABLE:
+- App funcional en Replit
+- Instrucciones: npm install, prisma migrate, seed, npm run dev
+- Seed: 1 admin, 1 owner, 1 recepcionista, 1 facialista; áreas básicas; servicios faciales básicos; 1 paquete láser 10 sesiones
