@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { apiRequest, getApiUrl } from "@/lib/query-client";
+import { apiRequest, setAuthToken, getApiUrl } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 
 export type Role = "ADMIN" | "OWNER" | "RECEPTION" | "FACIALIST";
@@ -36,25 +36,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkSession = async () => {
     try {
-      const baseUrl = getApiUrl();
-      const url = new URL("/api/auth/me", baseUrl);
-      const res = await fetch(url.toString(), { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json() as AuthUser;
-        setUser(data);
-        await AsyncStorage.setItem("auth_user", JSON.stringify(data));
-      } else {
-        const cached = await AsyncStorage.getItem("auth_user");
-        if (cached) {
-          const parsed = JSON.parse(cached) as AuthUser;
-          setUser(parsed);
+      const storedToken = await AsyncStorage.getItem("auth_token");
+      const storedUser = await AsyncStorage.getItem("auth_user");
+      if (storedToken && storedUser) {
+        setAuthToken(storedToken);
+        const baseUrl = getApiUrl();
+        const url = new URL("/api/auth/me", baseUrl);
+        const res = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${storedToken}` },
+        });
+        if (res.ok) {
+          const data = await res.json() as AuthUser;
+          setUser(data);
+          await AsyncStorage.setItem("auth_user", JSON.stringify(data));
+        } else {
+          setAuthToken(null);
+          await AsyncStorage.removeItem("auth_token");
+          await AsyncStorage.removeItem("auth_user");
         }
       }
     } catch {
-      try {
-        const cached = await AsyncStorage.getItem("auth_user");
-        if (cached) setUser(JSON.parse(cached) as AuthUser);
-      } catch {}
+      setAuthToken(null);
     } finally {
       setIsLoading(false);
     }
@@ -62,16 +64,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/login", { email, password });
-    const data = await res.json() as AuthUser;
-    setUser(data);
-    await AsyncStorage.setItem("auth_user", JSON.stringify(data));
+    const data = await res.json() as { token: string } & AuthUser;
+    setAuthToken(data.token);
+    const userData: AuthUser = { id: data.id, name: data.name, email: data.email, role: data.role };
+    setUser(userData);
+    await AsyncStorage.setItem("auth_token", data.token);
+    await AsyncStorage.setItem("auth_user", JSON.stringify(userData));
   };
 
   const logout = async () => {
     try {
       await apiRequest("POST", "/api/auth/logout", {});
     } catch {}
+    setAuthToken(null);
     setUser(null);
+    await AsyncStorage.removeItem("auth_token");
     await AsyncStorage.removeItem("auth_user");
   };
 

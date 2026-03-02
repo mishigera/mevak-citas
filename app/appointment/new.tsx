@@ -15,7 +15,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
-import { apiRequest, getApiUrl } from "@/lib/query-client";
+import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
 
@@ -50,12 +50,14 @@ export default function NewAppointmentScreen() {
   const [showStaffPicker, setShowStaffPicker] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
 
+  const authH = () => ({ Authorization: `Bearer ${getAuthToken() || ""}` });
+
   const { data: clients } = useQuery<any[]>({
     queryKey: ["/api/clients"],
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/clients", base);
-      const res = await fetch(url.toString(), { credentials: "include" });
+      const res = await fetch(url.toString(), { headers: authH() });
       return res.json() as Promise<any[]>;
     },
   });
@@ -65,7 +67,7 @@ export default function NewAppointmentScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/users/staff", base);
-      const res = await fetch(url.toString(), { credentials: "include" });
+      const res = await fetch(url.toString(), { headers: authH() });
       return res.json() as Promise<any[]>;
     },
   });

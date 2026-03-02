@@ -130,6 +130,11 @@ export interface AvailabilityBlock {
   reason?: string;
 }
 
+export interface AuthToken {
+  userId: string;
+  role: Role;
+}
+
 class MemStorage {
   users: Map<string, User> = new Map();
   clients: Map<string, Client> = new Map();
@@ -144,6 +149,7 @@ class MemStorage {
   laserSessions: Map<string, LaserSession> = new Map();
   payments: Map<string, Payment> = new Map();
   availabilityBlocks: Map<string, AvailabilityBlock> = new Map();
+  tokens: Map<string, AuthToken> = new Map();
 
   constructor() {
     this.seed();
@@ -156,9 +162,9 @@ class MemStorage {
     const facHash = await bcrypt.hash("fac123", 10);
 
     const admin: User = { id: randomUUID(), name: "Admin", email: "admin@beauty.com", passwordHash: adminHash, role: "ADMIN", isActive: true, createdAt: new Date().toISOString() };
-    const owner: User = { id: randomUUID(), name: "Laura (Owner)", email: "owner@beauty.com", passwordHash: ownerHash, role: "OWNER", isActive: true, createdAt: new Date().toISOString() };
-    const recep: User = { id: randomUUID(), name: "Sofia (Recep)", email: "recep@beauty.com", passwordHash: recepHash, role: "RECEPTION", isActive: true, createdAt: new Date().toISOString() };
-    const fac: User = { id: randomUUID(), name: "Valeria (Facial)", email: "fac@beauty.com", passwordHash: facHash, role: "FACIALIST", isActive: true, createdAt: new Date().toISOString() };
+    const owner: User = { id: randomUUID(), name: "Laura (Laserista)", email: "owner@beauty.com", passwordHash: ownerHash, role: "OWNER", isActive: true, createdAt: new Date().toISOString() };
+    const recep: User = { id: randomUUID(), name: "Sofia (Recepción)", email: "recep@beauty.com", passwordHash: recepHash, role: "RECEPTION", isActive: true, createdAt: new Date().toISOString() };
+    const fac: User = { id: randomUUID(), name: "Valeria (Facialista)", email: "fac@beauty.com", passwordHash: facHash, role: "FACIALIST", isActive: true, createdAt: new Date().toISOString() };
 
     [admin, owner, recep, fac].forEach(u => this.users.set(u.id, u));
 
@@ -201,69 +207,21 @@ class MemStorage {
     const today = new Date();
     const todayStr = today.toISOString().split("T")[0];
 
-    const appt1: Appointment = {
-      id: randomUUID(),
-      dateTimeStart: `${todayStr}T09:00:00.000Z`,
-      dateTimeEnd: `${todayStr}T10:00:00.000Z`,
-      clientId: clients[0].id,
-      staffId: fac.id,
-      type: "FACIAL",
-      status: "SCHEDULED",
-      notes: "Acné en frente",
-    };
-    const appt2: Appointment = {
-      id: randomUUID(),
-      dateTimeStart: `${todayStr}T11:00:00.000Z`,
-      dateTimeEnd: `${todayStr}T12:00:00.000Z`,
-      clientId: clients[1].id,
-      staffId: owner.id,
-      type: "LASER",
-      status: "SCHEDULED",
-    };
-    const appt3: Appointment = {
-      id: randomUUID(),
-      dateTimeStart: `${todayStr}T13:00:00.000Z`,
-      dateTimeEnd: `${todayStr}T14:00:00.000Z`,
-      clientId: clients[2].id,
-      staffId: fac.id,
-      type: "FACIAL",
-      status: "ARRIVED",
-    };
+    const appt1: Appointment = { id: randomUUID(), dateTimeStart: `${todayStr}T09:00:00.000Z`, dateTimeEnd: `${todayStr}T10:00:00.000Z`, clientId: clients[0].id, staffId: fac.id, type: "FACIAL", status: "SCHEDULED", notes: "Acné en frente" };
+    const appt2: Appointment = { id: randomUUID(), dateTimeStart: `${todayStr}T11:00:00.000Z`, dateTimeEnd: `${todayStr}T12:00:00.000Z`, clientId: clients[1].id, staffId: owner.id, type: "LASER", status: "SCHEDULED" };
+    const appt3: Appointment = { id: randomUUID(), dateTimeStart: `${todayStr}T13:00:00.000Z`, dateTimeEnd: `${todayStr}T14:00:00.000Z`, clientId: clients[2].id, staffId: fac.id, type: "FACIAL", status: "ARRIVED" };
     [appt1, appt2, appt3].forEach(a => this.appointments.set(a.id, a));
 
     const appSvc1: AppointmentService = { id: randomUUID(), appointmentId: appt1.id, serviceId: services[0].id };
     this.appointmentServices.set(appSvc1.id, appSvc1);
 
-    const cp: ClientPackage = {
-      id: randomUUID(),
-      clientId: clients[1].id,
-      packageId: pkg.id,
-      totalSessions: 10,
-      usedSessions: 3,
-      remainingSessions: 7,
-      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      status: "ACTIVE",
-    };
+    const cp: ClientPackage = { id: randomUUID(), clientId: clients[1].id, packageId: pkg.id, totalSessions: 10, usedSessions: 3, remainingSessions: 7, startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), status: "ACTIVE" };
     this.clientPackages.set(cp.id, cp);
 
-    const ls: LaserSession = {
-      id: randomUUID(),
-      appointmentId: appt2.id,
-      clientPackageId: cp.id,
-      sessionNumber: 4,
-      areasSnapshotJson: [laserAreas[0].svgKey, laserAreas[3].svgKey],
-    };
+    const ls: LaserSession = { id: randomUUID(), appointmentId: appt2.id, clientPackageId: cp.id, sessionNumber: 4, areasSnapshotJson: [laserAreas[0].svgKey, laserAreas[3].svgKey] };
     this.laserSessions.set(ls.id, ls);
 
-    const clinical: ClinicalProfile = {
-      id: randomUUID(),
-      clientId: clients[1].id,
-      allergiesFlag: false,
-      conditionsJson: { diabetes: false, hipertension: true, renales: false, cardiacas: false, circulatorias: false, digestivas: false, pulmonares: false, endocrinas: false, neurologicas: false, hematologicas: false, dermatologicas: false, otrosText: "" },
-      phototype: 2,
-      eyeColor: "café",
-      hairColor: "negro",
-    };
+    const clinical: ClinicalProfile = { id: randomUUID(), clientId: clients[1].id, allergiesFlag: false, conditionsJson: { diabetes: false, hipertension: true, renales: false, cardiacas: false, circulatorias: false, digestivas: false, pulmonares: false, endocrinas: false, neurologicas: false, hematologicas: false, dermatologicas: false, otrosText: "" }, phototype: 2, eyeColor: "café", hairColor: "negro" };
     this.clinicalProfiles.set(clinical.id, clinical);
   }
 }

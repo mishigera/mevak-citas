@@ -1,40 +1,48 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "node:http";
-import session from "express-session";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "crypto";
 import { storage, type Role, type AppointmentStatus, type PaymentMethod } from "./storage";
 
-declare module "express-session" {
-  interface SessionData {
-    userId: string;
-    role: Role;
+declare global {
+  namespace Express {
+    interface Request {
+      userId?: string;
+      userRole?: Role;
+    }
   }
 }
 
-function requireAuth(req: Request, res: Response, next: Function) {
-  if (!req.session.userId) return res.status(401).json({ message: "Unauthorized" });
+function getToken(req: Request): string | null {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith("Bearer ")) return null;
+  return auth.slice(7);
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const token = getToken(req);
+  if (!token) return res.status(401).json({ message: "Unauthorized" });
+  const session = storage.tokens.get(token);
+  if (!session) return res.status(401).json({ message: "Unauthorized" });
+  req.userId = session.userId;
+  req.userRole = session.role;
   next();
 }
 
 function requireRole(...roles: Role[]) {
-  return (req: Request, res: Response, next: Function) => {
-    if (!req.session.userId) return res.status(401).json({ message: "Unauthorized" });
-    if (!roles.includes(req.session.role!)) return res.status(403).json({ message: "Forbidden" });
+  return (req: Request, res: Response, next: NextFunction) => {
+    const token = getToken(req);
+    if (!token) return res.status(401).json({ message: "Unauthorized" });
+    const session = storage.tokens.get(token);
+    if (!session) return res.status(401).json({ message: "Unauthorized" });
+    if (!roles.includes(session.role)) return res.status(403).json({ message: "Forbidden" });
+    req.userId = session.userId;
+    req.userRole = session.role;
     next();
   };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  app.use(
-    session({
-      secret: process.env.SESSION_SECRET || "beauty-center-secret-2024",
-      resave: false,
-      saveUninitialized: false,
-      cookie: { secure: false, httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 },
-    })
-  );
-
   // AUTH
   app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
@@ -43,30 +51,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!user) return res.status(401).json({ message: "Credenciales incorrectas" });
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) return res.status(401).json({ message: "Credenciales incorrectas" });
-    req.session.userId = user.id;
-    req.session.role = user.role;
-    res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+    const token = randomUUID();
+    storage.tokens.set(token, { userId: user.id, role: user.role });
+    res.json({ token, id: user.id, name: user.name, email: user.email, role: user.role });
   });
 
-  app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy(() => res.json({ ok: true }));
+  app.post("/api/auth/logout", requireAuth, (req, res) => {
+    const token = getToken(req)!;
+    storage.tokens.delete(token);
+    res.json({ ok: true });
   });
 
   app.get("/api/auth/me", requireAuth, (req, res) => {
-    const user = storage.users.get(req.session.userId!);
-    if (!user) return res.status(401).json({ message: "Not found" });
+    const user = storage.users.get(req.userId!);
+    if (!user) return res.status(404).json({ message: "Not found" });
     res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
   });
 
   // USERS
   app.get("/api/users", requireAuth, (req, res) => {
     const users = Array.from(storage.users.values()).map((u) => ({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      role: u.role,
-      isActive: u.isActive,
-      createdAt: u.createdAt,
+      id: u.id, name: u.name, email: u.email, role: u.role, isActive: u.isActive, createdAt: u.createdAt,
     }));
     res.json(users);
   });
@@ -108,7 +113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let clients = Array.from(storage.clients.values());
     if (search) {
       const q = (search as string).toLowerCase();
-      clients = clients.filter((c) => c.fullName.toLowerCase().includes(q) || c.phone.includes(q as string));
+      clients = clients.filter((c) => c.fullName.toLowerCase().includes(q) || c.phone.includes(search as string));
     }
     clients.sort((a, b) => a.fullName.localeCompare(b.fullName));
     res.json(clients);
@@ -158,46 +163,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // LASER AREAS
   app.get("/api/laser-areas", requireAuth, (req, res) => {
-    const areas = Array.from(storage.laserAreas.values()).filter((a) => a.isActive);
-    res.json(areas);
+    res.json(Array.from(storage.laserAreas.values()).filter((a) => a.isActive));
   });
 
   app.get("/api/clients/:id/laser-areas", requireAuth, (req, res) => {
-    const selections = Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === req.params.id);
-    res.json(selections);
+    res.json(Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === req.params.id));
   });
 
   app.put("/api/clients/:id/laser-areas", requireRole("ADMIN", "OWNER"), (req, res) => {
     const { areaIds } = req.body as { areaIds: string[] };
-    const existing = Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === req.params.id);
-    existing.forEach((s) => storage.clientLaserSelections.delete(s.id));
-    const newSelections = areaIds.map((areaId) => {
-      const sel = { id: randomUUID(), clientId: req.params.id, areaId };
-      storage.clientLaserSelections.set(sel.id, sel);
-      return sel;
-    });
+    Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === req.params.id).forEach((s) => storage.clientLaserSelections.delete(s.id));
+    const newSelections = areaIds.map((areaId) => { const sel = { id: randomUUID(), clientId: req.params.id, areaId }; storage.clientLaserSelections.set(sel.id, sel); return sel; });
     res.json(newSelections);
   });
 
   // CLIENT PACKAGES
   app.get("/api/clients/:id/packages", requireAuth, (req, res) => {
-    const pkgs = Array.from(storage.clientPackages.values()).filter((p) => p.clientId === req.params.id);
-    res.json(pkgs);
+    res.json(Array.from(storage.clientPackages.values()).filter((p) => p.clientId === req.params.id));
   });
 
   app.post("/api/clients/:id/packages", requireRole("ADMIN", "OWNER"), (req, res) => {
     const pkg = storage.packages.get(req.body.packageId);
     if (!pkg) return res.status(404).json({ message: "Paquete no encontrado" });
-    const cp = {
-      id: randomUUID(),
-      clientId: req.params.id,
-      packageId: pkg.id,
-      totalSessions: pkg.totalSessions,
-      usedSessions: 0,
-      remainingSessions: pkg.totalSessions,
-      startDate: new Date().toISOString(),
-      status: "ACTIVE" as const,
-    };
+    const cp = { id: randomUUID(), clientId: req.params.id, packageId: pkg.id, totalSessions: pkg.totalSessions, usedSessions: 0, remainingSessions: pkg.totalSessions, startDate: new Date().toISOString(), status: "ACTIVE" as const };
     storage.clientPackages.set(cp.id, cp);
     res.status(201).json(cp);
   });
@@ -243,23 +231,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/appointments", requireAuth, (req, res) => {
     const { date, staffId, clientId } = req.query;
     let appts = Array.from(storage.appointments.values());
-    if (date) {
-      appts = appts.filter((a) => a.dateTimeStart.startsWith(date as string));
-    }
-    if (staffId) {
-      appts = appts.filter((a) => a.staffId === staffId);
-    }
-    if (clientId) {
-      appts = appts.filter((a) => a.clientId === clientId);
-    }
+    if (date) appts = appts.filter((a) => a.dateTimeStart.startsWith(date as string));
+    if (staffId) appts = appts.filter((a) => a.staffId === staffId);
+    if (clientId) appts = appts.filter((a) => a.clientId === clientId);
     appts.sort((a, b) => a.dateTimeStart.localeCompare(b.dateTimeStart));
     const enriched = appts.map((a) => {
       const client = storage.clients.get(a.clientId);
       const staff = storage.users.get(a.staffId);
-      const services = Array.from(storage.appointmentServices.values())
-        .filter((s) => s.appointmentId === a.id)
-        .map((s) => storage.services.get(s.serviceId))
-        .filter(Boolean);
+      const services = Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === a.id).map((s) => storage.services.get(s.serviceId)).filter(Boolean);
       return { ...a, client, staff: staff ? { id: staff.id, name: staff.name, role: staff.role } : null, services };
     });
     res.json(enriched);
@@ -270,44 +249,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!appt) return res.status(404).json({ message: "Not found" });
     const client = storage.clients.get(appt.clientId);
     const staff = storage.users.get(appt.staffId);
-    const services = Array.from(storage.appointmentServices.values())
-      .filter((s) => s.appointmentId === appt.id)
-      .map((s) => storage.services.get(s.serviceId))
-      .filter(Boolean);
+    const services = Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === appt.id).map((s) => storage.services.get(s.serviceId)).filter(Boolean);
     const payment = Array.from(storage.payments.values()).find((p) => p.appointmentId === appt.id);
     const laserSession = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === appt.id);
     let clientPackage = null;
-    if (laserSession?.clientPackageId) {
-      clientPackage = storage.clientPackages.get(laserSession.clientPackageId);
-    }
+    if (laserSession?.clientPackageId) clientPackage = storage.clientPackages.get(laserSession.clientPackageId);
     res.json({ ...appt, client, staff: staff ? { id: staff.id, name: staff.name, role: staff.role } : null, services, payment, laserSession, clientPackage });
   });
 
   app.post("/api/appointments", requireAuth, (req, res) => {
     const { dateTimeStart, dateTimeEnd, clientId, staffId, type, notes } = req.body;
     if (!dateTimeStart || !dateTimeEnd || !clientId || !staffId || !type) return res.status(400).json({ message: "Faltan campos" });
-
     const conflict = Array.from(storage.appointments.values()).find((a) => {
-      if (a.staffId !== staffId) return false;
-      if (a.status === "CANCELLED") return false;
-      const start = new Date(dateTimeStart).getTime();
-      const end = new Date(dateTimeEnd).getTime();
-      const aStart = new Date(a.dateTimeStart).getTime();
-      const aEnd = new Date(a.dateTimeEnd).getTime();
+      if (a.staffId !== staffId || a.status === "CANCELLED") return false;
+      const start = new Date(dateTimeStart).getTime(); const end = new Date(dateTimeEnd).getTime();
+      const aStart = new Date(a.dateTimeStart).getTime(); const aEnd = new Date(a.dateTimeEnd).getTime();
       return start < aEnd && end > aStart;
     });
     if (conflict) return res.status(409).json({ message: "Conflicto de horario con otra cita" });
-
     const block = Array.from(storage.availabilityBlocks.values()).find((b) => {
       if (b.userId !== staffId) return false;
-      const start = new Date(dateTimeStart).getTime();
-      const end = new Date(dateTimeEnd).getTime();
-      const bStart = new Date(b.startDateTime).getTime();
-      const bEnd = new Date(b.endDateTime).getTime();
+      const start = new Date(dateTimeStart).getTime(); const end = new Date(dateTimeEnd).getTime();
+      const bStart = new Date(b.startDateTime).getTime(); const bEnd = new Date(b.endDateTime).getTime();
       return start < bEnd && end > bStart;
     });
     if (block) return res.status(409).json({ message: "El staff tiene un bloqueo en ese horario" });
-
     const appt = { id: randomUUID(), dateTimeStart, dateTimeEnd, clientId, staffId, type, status: "SCHEDULED" as const, notes };
     storage.appointments.set(appt.id, appt);
     res.status(201).json(appt);
@@ -318,17 +284,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!appt) return res.status(404).json({ message: "Not found" });
     const { dateTimeStart, dateTimeEnd, staffId, status, notes, clientId, type } = req.body;
     if ((dateTimeStart || dateTimeEnd) && (staffId || appt.staffId)) {
-      const checkStaff = staffId || appt.staffId;
-      const checkStart = dateTimeStart || appt.dateTimeStart;
-      const checkEnd = dateTimeEnd || appt.dateTimeEnd;
+      const checkStaff = staffId || appt.staffId; const checkStart = dateTimeStart || appt.dateTimeStart; const checkEnd = dateTimeEnd || appt.dateTimeEnd;
       const conflict = Array.from(storage.appointments.values()).find((a) => {
-        if (a.id === appt.id) return false;
-        if (a.staffId !== checkStaff) return false;
-        if (a.status === "CANCELLED") return false;
-        const start = new Date(checkStart).getTime();
-        const end = new Date(checkEnd).getTime();
-        const aStart = new Date(a.dateTimeStart).getTime();
-        const aEnd = new Date(a.dateTimeEnd).getTime();
+        if (a.id === appt.id || a.staffId !== checkStaff || a.status === "CANCELLED") return false;
+        const start = new Date(checkStart).getTime(); const end = new Date(checkEnd).getTime();
+        const aStart = new Date(a.dateTimeStart).getTime(); const aEnd = new Date(a.dateTimeEnd).getTime();
         return start < aEnd && end > aStart;
       });
       if (conflict) return res.status(409).json({ message: "Conflicto de horario con otra cita" });
@@ -347,13 +307,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // APPOINTMENT SERVICES
   app.put("/api/appointments/:id/services", requireAuth, (req, res) => {
     const { serviceIds } = req.body as { serviceIds: string[] };
-    const existing = Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === req.params.id);
-    existing.forEach((s) => storage.appointmentServices.delete(s.id));
-    const newSvcs = serviceIds.map((serviceId) => {
-      const svc = { id: randomUUID(), appointmentId: req.params.id, serviceId };
-      storage.appointmentServices.set(svc.id, svc);
-      return svc;
-    });
+    Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === req.params.id).forEach((s) => storage.appointmentServices.delete(s.id));
+    const newSvcs = serviceIds.map((serviceId) => { const svc = { id: randomUUID(), appointmentId: req.params.id, serviceId }; storage.appointmentServices.set(svc.id, svc); return svc; });
     res.json(newSvcs);
   });
 
@@ -378,8 +333,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // PAYMENTS
   app.get("/api/appointments/:id/payment", requireAuth, (req, res) => {
-    const payment = Array.from(storage.payments.values()).find((p) => p.appointmentId === req.params.id);
-    res.json(payment || null);
+    res.json(Array.from(storage.payments.values()).find((p) => p.appointmentId === req.params.id) || null);
   });
 
   app.post("/api/appointments/:id/payment", requireAuth, (req, res) => {
@@ -390,27 +344,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (existing) return res.status(409).json({ message: "Ya existe un pago" });
     const total = Number(totalAmount) || 0;
     const isFacial = appt.type === "FACIAL";
-    const payment = {
-      id: randomUUID(),
-      appointmentId: req.params.id,
-      method: method as PaymentMethod,
-      totalAmount: total,
-      ownerNetAmount: isFacial ? Math.floor(total / 2) : total,
-      facialistNetAmount: isFacial ? Math.ceil(total / 2) : 0,
-      facialistPaidFlag: false,
-      createdAt: new Date().toISOString(),
-    };
+    const payment = { id: randomUUID(), appointmentId: req.params.id, method: method as PaymentMethod, totalAmount: total, ownerNetAmount: isFacial ? Math.floor(total / 2) : total, facialistNetAmount: isFacial ? Math.ceil(total / 2) : 0, facialistPaidFlag: false, createdAt: new Date().toISOString() };
     storage.payments.set(payment.id, payment);
     appt.status = "DONE";
     storage.appointments.set(appt.id, appt);
     if (req.body.clientPackageId) {
       const cp = storage.clientPackages.get(req.body.clientPackageId);
-      if (cp) {
-        cp.usedSessions += 1;
-        cp.remainingSessions = cp.totalSessions - cp.usedSessions;
-        if (cp.remainingSessions <= 0) cp.status = "FINISHED";
-        storage.clientPackages.set(cp.id, cp);
-      }
+      if (cp) { cp.usedSessions += 1; cp.remainingSessions = cp.totalSessions - cp.usedSessions; if (cp.remainingSessions <= 0) cp.status = "FINISHED"; storage.clientPackages.set(cp.id, cp); }
     }
     res.status(201).json(payment);
   });
@@ -438,12 +378,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/reports/income", requireRole("ADMIN", "OWNER"), (req, res) => {
     const { month, year } = req.query;
     let payments = Array.from(storage.payments.values());
-    if (month && year) {
-      payments = payments.filter((p) => {
-        const d = new Date(p.createdAt);
-        return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year);
-      });
-    }
+    if (month && year) { payments = payments.filter((p) => { const d = new Date(p.createdAt); return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year); }); }
     const total = payments.reduce((s, p) => s + p.totalAmount, 0);
     const ownerNet = payments.reduce((s, p) => s + p.ownerNetAmount, 0);
     const facialistNet = payments.reduce((s, p) => s + p.facialistNetAmount, 0);
@@ -452,23 +387,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // AVAILABILITY BLOCKS
   app.get("/api/blocks", requireAuth, (req, res) => {
-    const userId = req.session.userId!;
-    const role = req.session.role!;
+    const userId = req.userId!;
+    const role = req.userRole!;
     let blocks = Array.from(storage.availabilityBlocks.values());
-    if (role !== "ADMIN") {
-      blocks = blocks.filter((b) => b.userId === userId);
-    }
-    const enriched = blocks.map((b) => {
-      const user = storage.users.get(b.userId);
-      return { ...b, user: user ? { id: user.id, name: user.name } : null };
-    });
+    if (role !== "ADMIN") blocks = blocks.filter((b) => b.userId === userId);
+    const enriched = blocks.map((b) => { const user = storage.users.get(b.userId); return { ...b, user: user ? { id: user.id, name: user.name } : null }; });
     res.json(enriched);
   });
 
   app.post("/api/blocks", requireRole("ADMIN", "OWNER", "FACIALIST"), (req, res) => {
     const { startDateTime, endDateTime, reason } = req.body;
     if (!startDateTime || !endDateTime) return res.status(400).json({ message: "Faltan fechas" });
-    const block = { id: randomUUID(), userId: req.session.userId!, startDateTime, endDateTime, reason };
+    const block = { id: randomUUID(), userId: req.userId!, startDateTime, endDateTime, reason };
     storage.availabilityBlocks.set(block.id, block);
     res.status(201).json(block);
   });
@@ -476,9 +406,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/blocks/:id", requireRole("ADMIN", "OWNER", "FACIALIST"), (req, res) => {
     const block = storage.availabilityBlocks.get(req.params.id);
     if (!block) return res.status(404).json({ message: "Not found" });
-    if (block.userId !== req.session.userId && req.session.role !== "ADMIN") {
-      return res.status(403).json({ message: "No puedes eliminar bloqueos de otro usuario" });
-    }
+    if (block.userId !== req.userId && req.userRole !== "ADMIN") return res.status(403).json({ message: "No puedes eliminar bloqueos de otro usuario" });
     storage.availabilityBlocks.delete(req.params.id);
     res.json({ ok: true });
   });
@@ -490,10 +418,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .sort((a, b) => b.dateTimeStart.localeCompare(a.dateTimeStart))
       .map((a) => {
         const staff = storage.users.get(a.staffId);
-        const services = Array.from(storage.appointmentServices.values())
-          .filter((s) => s.appointmentId === a.id)
-          .map((s) => storage.services.get(s.serviceId))
-          .filter(Boolean);
+        const services = Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === a.id).map((s) => storage.services.get(s.serviceId)).filter(Boolean);
         const payment = Array.from(storage.payments.values()).find((p) => p.appointmentId === a.id);
         return { ...a, staff: staff ? { id: staff.id, name: staff.name } : null, services, payment };
       });

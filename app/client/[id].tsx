@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -13,15 +13,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
-import { apiRequest, getApiUrl } from "@/lib/query-client";
+import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
-
-const TABS = ["Resumen", "Faciales", "Láser", "Clínica"] as const;
-type Tab = typeof TABS[number];
 
 const PHOTOTYPES = [
   { num: 1, skin: "#FDECD0", desc: "Siempre se quema, nunca se broncea. Muy blanca." },
@@ -54,7 +51,7 @@ function formatDate(iso?: string) {
 
 function formatTime(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: true });
+  return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -63,23 +60,38 @@ function StatusPill({ status }: { status: string }) {
   return <View style={[styles.pill, { backgroundColor: color + "20" }]}><Text style={[styles.pillText, { color }]}>{labels[status] || status}</Text></View>;
 }
 
+function authH() {
+  return { Authorization: `Bearer ${getAuthToken() || ""}` };
+}
+
 export default function ClientDetailScreen() {
   const insets = useSafeAreaInsets();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, tab: tabParam } = useLocalSearchParams<{ id: string; tab?: string }>();
   const qc = useQueryClient();
-  const { canViewClinical, isOwnerOrAdmin } = useAuth();
+  const { canViewClinical, user } = useAuth();
+  const role = user?.role;
 
-  const [activeTab, setActiveTab] = useState<Tab>("Resumen");
+  const availableTabs = useMemo(() => {
+    if (role === "FACIALIST") return ["Resumen", "Faciales"] as const;
+    if (role === "OWNER") return ["Resumen", "Láser", "Clínica"] as const;
+    if (role === "RECEPTION") return ["Resumen"] as const;
+    return ["Resumen", "Faciales", "Láser", "Clínica"] as const;
+  }, [role]);
+
+  type Tab = "Resumen" | "Faciales" | "Láser" | "Clínica";
+
+  const defaultTab: Tab = (tabParam === "clinical" && canViewClinical) ? "Clínica" : "Resumen";
+  const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [clinical, setClinical] = useState<any>(null);
-  const [clinicalEditing, setClinicalEditing] = useState(false);
+  const [clinicalEditing, setClinicalEditing] = useState(tabParam === "clinical" && canViewClinical);
 
   const { data: client, isLoading } = useQuery<any>({
     queryKey: ["/api/clients", id],
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/clients/${id}`, base);
-      const res = await fetch(url.toString(), { credentials: "include" });
-      return res.json() as Promise<any>;
+      const res = await fetch(url.toString(), { headers: authH() });
+      return res.json();
     },
   });
 
@@ -88,8 +100,9 @@ export default function ClientDetailScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/clients/${id}/appointments`, base);
-      const res = await fetch(url.toString(), { credentials: "include" });
-      return res.json() as Promise<any[]>;
+      const res = await fetch(url.toString(), { headers: authH() });
+      if (!res.ok) return [];
+      return res.json();
     },
   });
 
@@ -98,8 +111,9 @@ export default function ClientDetailScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/clients/${id}/packages`, base);
-      const res = await fetch(url.toString(), { credentials: "include" });
-      return res.json() as Promise<any[]>;
+      const res = await fetch(url.toString(), { headers: authH() });
+      if (!res.ok) return [];
+      return res.json();
     },
   });
 
@@ -109,8 +123,9 @@ export default function ClientDetailScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/clients/${id}/clinical`, base);
-      const res = await fetch(url.toString(), { credentials: "include" });
-      const data = await res.json() as any;
+      const res = await fetch(url.toString(), { headers: authH() });
+      if (!res.ok) return null;
+      const data = await res.json();
       const defaultConditions = Object.fromEntries(CONDITIONS_LIST.map((c) => [c.key, false]));
       const obj = data || { allergiesFlag: false, conditionsJson: defaultConditions, phototype: null };
       setClinical(obj);
@@ -130,8 +145,8 @@ export default function ClientDetailScreen() {
     onError: (err: Error) => Alert.alert("Error", err.message),
   });
 
-  const facialAppts = (appointments || []).filter((a) => a.type === "FACIAL");
-  const laserAppts = (appointments || []).filter((a) => a.type === "LASER");
+  const facialAppts = useMemo(() => (appointments || []).filter((a) => a.type === "FACIAL"), [appointments]);
+  const laserAppts = useMemo(() => (appointments || []).filter((a) => a.type === "LASER"), [appointments]);
 
   const initials = (client?.fullName || "?").split(" ").slice(0, 2).map((w: string) => w[0]?.toUpperCase() || "").join("");
 
@@ -144,6 +159,7 @@ export default function ClientDetailScreen() {
   }
 
   function renderResumen() {
+    const recentAppts = (appointments || []).slice(0, 5);
     return (
       <View style={styles.tabContent}>
         <View style={styles.card}>
@@ -151,17 +167,15 @@ export default function ClientDetailScreen() {
           {[
             ["Teléfono", client?.phone],
             ["Correo", client?.email],
-            ["Nacimiento", formatDate(client?.birthDate)],
-            ["Sexo", client?.sex === "F" ? "Femenino" : client?.sex === "M" ? "Masculino" : "-"],
+            ["Nacimiento", client?.birthDate ? formatDate(client.birthDate) : null],
+            ["Sexo", client?.sex === "F" ? "Femenino" : client?.sex === "M" ? "Masculino" : null],
             ["Ocupación", client?.occupation],
-          ].map(([label, value]) =>
-            value ? (
-              <View key={label} style={styles.infoRow}>
-                <Text style={styles.infoLabel}>{label}</Text>
-                <Text style={styles.infoValue}>{value}</Text>
-              </View>
-            ) : null
-          )}
+          ].filter(([, v]) => v).map(([label, value]) => (
+            <View key={label as string} style={styles.infoRow}>
+              <Text style={styles.infoLabel}>{label}</Text>
+              <Text style={styles.infoValue}>{value}</Text>
+            </View>
+          ))}
         </View>
 
         <Pressable
@@ -174,17 +188,18 @@ export default function ClientDetailScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Últimas citas</Text>
-          {(appointments || []).slice(0, 3).map((a: any) => (
+          {recentAppts.length === 0 ? (
+            <Text style={styles.emptyText}>Sin citas registradas</Text>
+          ) : recentAppts.map((a: any) => (
             <Pressable key={a.id} style={styles.apptRow} onPress={() => router.push(`/appointment/${a.id}`)}>
               <View style={[styles.apptTypeDot, { backgroundColor: a.type === "LASER" ? Colors.secondary : Colors.accent }]} />
               <View style={styles.apptRowContent}>
                 <Text style={styles.apptRowDate}>{formatDate(a.dateTimeStart)}</Text>
-                <Text style={styles.apptRowTime}>{formatTime(a.dateTimeStart)}</Text>
+                <Text style={styles.apptRowTime}>{formatTime(a.dateTimeStart)} · {a.type === "LASER" ? "Láser" : "Facial"}</Text>
               </View>
               <StatusPill status={a.status} />
             </Pressable>
           ))}
-          {!appointments?.length && <Text style={styles.emptyText}>Sin citas registradas</Text>}
         </View>
       </View>
     );
@@ -198,20 +213,23 @@ export default function ClientDetailScreen() {
             <Ionicons name="sparkles-outline" size={40} color={Colors.textMuted} />
             <Text style={styles.emptyTitle}>Sin citas faciales</Text>
           </View>
-        ) : (
-          facialAppts.map((a: any) => (
-            <Pressable key={a.id} style={[styles.card, { padding: 14 }]} onPress={() => router.push(`/appointment/${a.id}`)}>
-              <View style={styles.apptCardHeader}>
+        ) : facialAppts.map((a: any) => (
+          <Pressable key={a.id} style={[styles.card, { padding: 14 }]} onPress={() => router.push(`/appointment/${a.id}`)}>
+            <View style={styles.apptCardHeader}>
+              <View>
                 <Text style={styles.apptCardDate}>{formatDate(a.dateTimeStart)}</Text>
-                <StatusPill status={a.status} />
+                <Text style={styles.apptCardTime}>{formatTime(a.dateTimeStart)}</Text>
               </View>
-              {a.services?.length > 0 && <Text style={styles.apptCardServices}>{a.services.map((s: any) => s?.name).join(", ")}</Text>}
-              {a.staff && <Text style={styles.apptCardStaff}>{a.staff.name}</Text>}
-              {a.payment && <Text style={styles.apptCardPayment}>${a.payment.totalAmount} · {a.payment.method}</Text>}
-              {a.notes && <Text style={styles.apptCardNotes}>{a.notes}</Text>}
-            </Pressable>
-          ))
-        )}
+              <StatusPill status={a.status} />
+            </View>
+            {a.services?.length > 0 && (
+              <Text style={styles.apptCardServices}>{a.services.map((s: any) => s?.name).join(", ")}</Text>
+            )}
+            {a.staff && <Text style={styles.apptCardStaff}>{a.staff.name}</Text>}
+            {a.payment && <Text style={styles.apptCardPayment}>💰 ${a.payment.totalAmount}</Text>}
+            {a.notes && <Text style={styles.apptCardNotes}>📝 {a.notes}</Text>}
+          </Pressable>
+        ))}
       </View>
     );
   }
@@ -229,7 +247,7 @@ export default function ClientDetailScreen() {
               </Text>
             </View>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${(cp.usedSessions / cp.totalSessions) * 100}%` }]} />
+              <View style={[styles.progressFill, { width: `${(cp.usedSessions / cp.totalSessions) * 100}%` as any }]} />
             </View>
             <Text style={styles.progressDate}>Inicio: {formatDate(cp.startDate)}</Text>
           </View>
@@ -240,34 +258,46 @@ export default function ClientDetailScreen() {
             <Ionicons name="flash-outline" size={40} color={Colors.textMuted} />
             <Text style={styles.emptyTitle}>Sin sesiones láser</Text>
           </View>
-        ) : (
-          laserAppts.map((a: any) => (
-            <Pressable key={a.id} style={[styles.card, { padding: 14 }]} onPress={() => router.push(`/appointment/${a.id}`)}>
-              <View style={styles.apptCardHeader}>
+        ) : laserAppts.map((a: any) => (
+          <Pressable key={a.id} style={[styles.card, { padding: 14 }]} onPress={() => router.push(`/appointment/${a.id}`)}>
+            <View style={styles.apptCardHeader}>
+              <View>
                 <Text style={styles.apptCardDate}>{formatDate(a.dateTimeStart)}</Text>
-                <StatusPill status={a.status} />
+                <Text style={styles.apptCardTime}>{formatTime(a.dateTimeStart)}</Text>
               </View>
-              {a.staff && <Text style={styles.apptCardStaff}>{a.staff.name}</Text>}
-              {a.notes && <Text style={styles.apptCardNotes}>{a.notes}</Text>}
-            </Pressable>
-          ))
-        )}
+              <StatusPill status={a.status} />
+            </View>
+            {a.staff && <Text style={styles.apptCardStaff}>{a.staff.name}</Text>}
+            {a.notes && <Text style={styles.apptCardNotes}>📝 {a.notes}</Text>}
+          </Pressable>
+        ))}
       </View>
     );
   }
 
   function renderClinica() {
-    if (!canViewClinical) {
+    const clin = clinical || clinicalData;
+    if (!clin && !clinicalEditing) {
       return (
-        <View style={styles.emptyState}>
-          <Ionicons name="lock-closed-outline" size={48} color={Colors.textMuted} />
-          <Text style={styles.emptyTitle}>Acceso restringido</Text>
-          <Text style={styles.emptySubtitle}>No tienes permiso para ver la historia clínica</Text>
+        <View style={styles.tabContent}>
+          <View style={styles.emptyState}>
+            <Ionicons name="document-text-outline" size={40} color={Colors.textMuted} />
+            <Text style={styles.emptyTitle}>Sin historia clínica</Text>
+          </View>
+          <Pressable
+            style={styles.newApptBtn}
+            onPress={() => {
+              setClinical({ allergiesFlag: false, conditionsJson: Object.fromEntries(CONDITIONS_LIST.map((c) => [c.key, false])), phototype: null });
+              setClinicalEditing(true);
+            }}
+          >
+            <Ionicons name="add" size={20} color="#fff" />
+            <Text style={styles.newApptBtnText}>Crear historia clínica</Text>
+          </Pressable>
         </View>
       );
     }
 
-    const clin = clinical || clinicalData;
     if (!clin) return <View style={styles.center}><ActivityIndicator color={Colors.primary} /></View>;
 
     if (!clinicalEditing) {
@@ -282,25 +312,29 @@ export default function ClientDetailScreen() {
             </View>
             {clin.phototype && (
               <View style={styles.phototypeDisplay}>
-                <View style={[styles.phototypeCircle, { backgroundColor: PHOTOTYPES[(clin.phototype - 1)]?.skin }]} />
-                <Text style={styles.phototypeText}>Fototipo {clin.phototype}: {PHOTOTYPES[(clin.phototype - 1)]?.desc}</Text>
+                <View style={[styles.phototypeCircle, { backgroundColor: PHOTOTYPES[clin.phototype - 1]?.skin }]} />
+                <Text style={styles.phototypeText}>Fototipo {clin.phototype}: {PHOTOTYPES[clin.phototype - 1]?.desc}</Text>
               </View>
             )}
-            <View style={styles.infoRow}><Text style={styles.infoLabel}>Alergias</Text><Text style={styles.infoValue}>{clin.allergiesFlag ? (clin.allergiesText || "Sí") : "No"}</Text></View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Alergias</Text>
+              <Text style={styles.infoValue}>{clin.allergiesFlag ? (clin.allergiesText || "Sí") : "No"}</Text>
+            </View>
             {clin.medsText && <View style={styles.infoRow}><Text style={styles.infoLabel}>Medicamentos</Text><Text style={styles.infoValue}>{clin.medsText}</Text></View>}
             {clin.surgeriesText && <View style={styles.infoRow}><Text style={styles.infoLabel}>Cirugías</Text><Text style={styles.infoValue}>{clin.surgeriesText}</Text></View>}
             {clin.eyeColor && <View style={styles.infoRow}><Text style={styles.infoLabel}>Color de ojos</Text><Text style={styles.infoValue}>{clin.eyeColor}</Text></View>}
             {clin.hairColor && <View style={styles.infoRow}><Text style={styles.infoLabel}>Color de cabello</Text><Text style={styles.infoValue}>{clin.hairColor}</Text></View>}
             {clin.conditionsJson && (
               <>
-                <Text style={[styles.cardTitle, { fontSize: 13, marginTop: 8 }]}>Antecedentes</Text>
-                {CONDITIONS_LIST.map((c) =>
-                  clin.conditionsJson[c.key] ? (
-                    <View key={c.key} style={styles.conditionRow}>
-                      <Ionicons name="checkmark-circle" size={16} color={Colors.warning} />
-                      <Text style={styles.conditionLabel}>{c.label}</Text>
-                    </View>
-                  ) : null
+                <Text style={[styles.cardTitle, { fontSize: 13, marginTop: 8 }]}>Antecedentes médicos</Text>
+                {CONDITIONS_LIST.filter((c) => clin.conditionsJson[c.key]).map((c) => (
+                  <View key={c.key} style={styles.conditionRow}>
+                    <Ionicons name="checkmark-circle" size={16} color={Colors.warning} />
+                    <Text style={styles.conditionLabel}>{c.label}</Text>
+                  </View>
+                ))}
+                {!CONDITIONS_LIST.some((c) => clin.conditionsJson[c.key]) && (
+                  <Text style={styles.emptyText}>Sin antecedentes relevantes</Text>
                 )}
               </>
             )}
@@ -343,6 +377,7 @@ export default function ClientDetailScreen() {
               value={clin?.allergiesText || ""}
               onChangeText={(v) => setClinical((p: any) => ({ ...p, allergiesText: v }))}
               placeholder="Describir alergias..."
+              placeholderTextColor={Colors.textMuted}
               multiline
             />
           )}
@@ -363,20 +398,21 @@ export default function ClientDetailScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Otros</Text>
-          {[
+          <Text style={styles.cardTitle}>Otros datos</Text>
+          {([
             ["medsText", "Medicamentos actuales"],
             ["surgeriesText", "Cirugías previas"],
             ["eyeColor", "Color de ojos"],
             ["hairColor", "Color de cabello"],
-          ].map(([key, label]) => (
+          ] as const).map(([key, label]) => (
             <View key={key} style={styles.clinField}>
               <Text style={styles.clinFieldLabel}>{label}</Text>
               <TextInput
                 style={styles.clinInput}
-                value={clin?.[key] || ""}
+                value={(clin as any)?.[key] || ""}
                 onChangeText={(v) => setClinical((p: any) => ({ ...p, [key]: v }))}
                 placeholder={label}
+                placeholderTextColor={Colors.textMuted}
               />
             </View>
           ))}
@@ -417,11 +453,11 @@ export default function ClientDetailScreen() {
       </View>
 
       <View style={styles.tabs}>
-        {TABS.filter((t) => t !== "Clínica" || canViewClinical).map((tab) => (
+        {(availableTabs as readonly string[]).map((tab) => (
           <Pressable
             key={tab}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => { Haptics.selectionAsync(); setActiveTab(tab); }}
+            onPress={() => { Haptics.selectionAsync(); setActiveTab(tab as Tab); }}
           >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
           </Pressable>
@@ -441,37 +477,38 @@ export default function ClientDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  center: { justifyContent: "center", alignItems: "center" },
+  center: { justifyContent: "center", alignItems: "center", flex: 1 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 8 },
-  headerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primaryLight, justifyContent: "center", alignItems: "center" },
-  avatarText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.primaryDark },
+  headerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primaryLight, justifyContent: "center", alignItems: "center" },
+  avatarText: { fontFamily: "Nunito_700Bold", fontSize: 16, color: Colors.primaryDark },
   clientHeader: { alignItems: "center", paddingBottom: 16, gap: 4 },
   clientName: { fontFamily: "Nunito_800ExtraBold", fontSize: 22, color: Colors.text },
   clientPhone: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary },
   tabs: { flexDirection: "row", paddingHorizontal: 16, marginBottom: 8, gap: 4 },
-  tab: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 10, backgroundColor: "transparent" },
+  tab: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 10 },
   tabActive: { backgroundColor: Colors.primaryLight },
   tabText: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textMuted },
   tabTextActive: { color: Colors.primaryDark },
   tabContent: { paddingHorizontal: 16, gap: 12 },
-  card: { backgroundColor: "#fff", borderRadius: 16, padding: 16, gap: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+  card: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 8, borderWidth: 1, borderColor: Colors.border },
   cardTitle: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.text },
   cardHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   editIconBtn: { padding: 4 },
   infoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   infoLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary, flex: 1 },
   infoValue: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.text, flex: 2, textAlign: "right" },
-  newApptBtn: { backgroundColor: Colors.primary, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  newApptBtn: { backgroundColor: Colors.primary, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14 },
   newApptBtnText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: "#fff" },
-  apptRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: Colors.border + "60" },
+  apptRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.border + "60" },
   apptTypeDot: { width: 8, height: 8, borderRadius: 4 },
   apptRowContent: { flex: 1 },
   apptRowDate: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.text },
   apptRowTime: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
   pill: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   pillText: { fontFamily: "Nunito_700Bold", fontSize: 10 },
-  apptCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  apptCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   apptCardDate: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.text },
+  apptCardTime: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
   apptCardServices: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textSecondary },
   apptCardStaff: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
   apptCardPayment: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.success },
@@ -483,7 +520,7 @@ const styles = StyleSheet.create({
   progressFill: { height: 8, backgroundColor: Colors.secondary, borderRadius: 4 },
   progressDate: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
   phototypeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  phototypeCard: { flex: 1, minWidth: "28%", alignItems: "center", paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: Colors.border, backgroundColor: "#fff", gap: 4 },
+  phototypeCard: { flex: 1, minWidth: "28%", alignItems: "center", paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.surface, gap: 4 },
   phototypeCardSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   phototypeCardCircle: { width: 36, height: 36, borderRadius: 18 },
   phototypeCardNum: { fontFamily: "Nunito_700Bold", fontSize: 12, color: Colors.text },
@@ -498,11 +535,10 @@ const styles = StyleSheet.create({
   clinFieldLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary },
   clinInput: { backgroundColor: Colors.background, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.text },
   emptyState: { alignItems: "center", paddingVertical: 48, gap: 8 },
-  emptyTitle: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
-  emptySubtitle: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary, textAlign: "center" },
-  emptyText: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textMuted },
+  emptyTitle: { fontFamily: "Nunito_700Bold", fontSize: 17, color: Colors.text },
+  emptyText: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textMuted },
   editBtns: { flexDirection: "row", gap: 10, paddingHorizontal: 16, marginBottom: 12 },
-  cancelEditBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
+  cancelEditBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center", backgroundColor: Colors.surface },
   cancelEditBtnText: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.textSecondary },
   saveEditBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: Colors.primary, alignItems: "center" },
   saveEditBtnText: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: "#fff" },

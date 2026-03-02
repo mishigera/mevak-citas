@@ -14,7 +14,7 @@ import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
-import { apiRequest, getApiUrl } from "@/lib/query-client";
+import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
 
@@ -38,7 +38,7 @@ export default function BlocksScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/blocks", base);
-      const res = await fetch(url.toString(), { credentials: "include" });
+      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${getAuthToken() || ""}` } });
       return res.json() as Promise<any[]>;
     },
   });

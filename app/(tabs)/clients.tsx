@@ -16,7 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import * as Haptics from "expo-haptics";
-import { getApiUrl } from "@/lib/query-client";
+import { getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 
 function getInitials(name: string) {
@@ -55,7 +55,7 @@ export default function ClientsScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/clients", base);
-      const res = await fetch(url.toString(), { credentials: "include" });
+      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${getAuthToken() || ""}` } });
       if (!res.ok) throw new Error("Error");
       return res.json() as Promise<any[]>;
     },

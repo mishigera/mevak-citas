@@ -8,15 +8,13 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
-  Switch,
-  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
-import { apiRequest, getApiUrl } from "@/lib/query-client";
+import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
@@ -35,15 +33,9 @@ const METHOD_LABELS: Record<string, string> = {
   INCLUDED: "Incluido (paquete)",
 };
 
-function formatDateTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) +
-    " · " + d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: true });
-}
-
 function formatTime(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: true });
+  return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -65,6 +57,10 @@ function InfoRow({ label, value }: { label: string; value?: string }) {
   );
 }
 
+function authHeaders() {
+  return { Authorization: `Bearer ${getAuthToken() || ""}` };
+}
+
 export default function AppointmentDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -73,7 +69,7 @@ export default function AppointmentDetailScreen() {
 
   const [notes, setNotes] = useState("");
   const [editingNotes, setEditingNotes] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "INCLUDED">("CASH");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
@@ -85,7 +81,7 @@ export default function AppointmentDetailScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/appointments/${id}`, base);
-      const res = await fetch(url.toString(), { credentials: "include" });
+      const res = await fetch(url.toString(), { headers: authHeaders() });
       if (!res.ok) throw new Error("Error al cargar cita");
       const data = await res.json() as any;
       setNotes(data.notes || "");
@@ -102,8 +98,8 @@ export default function AppointmentDetailScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/services?type=FACIAL", base);
-      const res = await fetch(url.toString(), { credentials: "include" });
-      return res.json() as Promise<any[]>;
+      const res = await fetch(url.toString(), { headers: authHeaders() });
+      return res.json();
     },
   });
 
@@ -113,8 +109,8 @@ export default function AppointmentDetailScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/clients/${appt.clientId}/packages`, base);
-      const res = await fetch(url.toString(), { credentials: "include" });
-      return res.json() as Promise<any[]>;
+      const res = await fetch(url.toString(), { headers: authHeaders() });
+      return res.json();
     },
   });
 
@@ -168,6 +164,12 @@ export default function AppointmentDetailScreen() {
     onSuccess: () => { refetch(); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); },
   });
 
+  const handleReSchedule = () => {
+    if (!appt) return;
+    const dateStr = appt.dateTimeStart.split("T")[0];
+    router.push(`/appointment/new?clientId=${appt.clientId}&staffId=${appt.staffId}&type=${appt.type}&date=${dateStr}`);
+  };
+
   if (isLoading) {
     return (
       <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
@@ -188,6 +190,7 @@ export default function AppointmentDetailScreen() {
   const typeColor = appt.type === "LASER" ? Colors.secondary : Colors.accent;
   const isDone = appt.status === "DONE";
   const isScheduledOrArrived = appt.status === "SCHEDULED" || appt.status === "ARRIVED";
+  const isNoShow = appt.status === "NO_SHOW";
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -199,10 +202,10 @@ export default function AppointmentDetailScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentInsetAdjustmentBehavior="automatic">
+      <ScrollView showsVerticalScrollIndicator={false}>
         <View style={[styles.topBanner, { backgroundColor: typeColor + "18", borderColor: typeColor + "40" }]}>
           <View style={styles.topBannerLeft}>
-            <Text style={[styles.bannerType, { color: typeColor }]}>{appt.type}</Text>
+            <Text style={[styles.bannerType, { color: typeColor }]}>{appt.type === "LASER" ? "LÁSER" : "FACIAL"}</Text>
             <Text style={styles.bannerClient}>{appt.client?.fullName}</Text>
             <Text style={styles.bannerTime}>{formatTime(appt.dateTimeStart)} – {formatTime(appt.dateTimeEnd)}</Text>
             <Text style={styles.bannerDate}>{new Date(appt.dateTimeStart).toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "long" })}</Text>
@@ -215,7 +218,7 @@ export default function AppointmentDetailScreen() {
         <View style={styles.content}>
           {/* STATUS ACTIONS */}
           {isScheduledOrArrived && (
-            <SectionCard title="Acciones rápidas">
+            <SectionCard title="Acciones">
               <View style={styles.actionRow}>
                 {appt.status === "SCHEDULED" && (
                   <Pressable
@@ -228,7 +231,12 @@ export default function AppointmentDetailScreen() {
                 )}
                 <Pressable
                   style={({ pressed }) => [styles.actionBtn, { backgroundColor: Colors.error + "18" }, pressed && { opacity: 0.7 }]}
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); updateStatusMutation.mutate("NO_SHOW"); }}
+                  onPress={() => {
+                    Alert.alert("No llegó", "¿La clienta no llegó?", [
+                      { text: "Cancelar", style: "cancel" },
+                      { text: "Confirmar", style: "destructive", onPress: () => updateStatusMutation.mutate("NO_SHOW") },
+                    ]);
+                  }}
                 >
                   <Ionicons name="close-circle" size={22} color={Colors.error} />
                   <Text style={[styles.actionBtnText, { color: Colors.error }]}>No llegó</Text>
@@ -249,9 +257,23 @@ export default function AppointmentDetailScreen() {
             </SectionCard>
           )}
 
+          {/* NO SHOW - REAGENDAR */}
+          {isNoShow && (
+            <SectionCard title="No llegó">
+              <Text style={styles.noShowText}>La clienta no llegó a esta cita.</Text>
+              <Pressable
+                style={({ pressed }) => [styles.reagendarBtn, pressed && { opacity: 0.85 }]}
+                onPress={handleReSchedule}
+              >
+                <Ionicons name="calendar" size={18} color="#fff" />
+                <Text style={styles.reagendarBtnText}>Reagendar cita</Text>
+              </Pressable>
+            </SectionCard>
+          )}
+
           {/* STAFF & CLIENT INFO */}
           <SectionCard title="Información">
-            <InfoRow label="Staff" value={appt.staff?.name} />
+            <InfoRow label="Profesional" value={appt.staff?.name} />
             <InfoRow label="Teléfono" value={appt.client?.phone} />
             {appt.client?.email && <InfoRow label="Correo" value={appt.client.email} />}
             {appt.clientPackage && (
@@ -276,11 +298,9 @@ export default function AppointmentDetailScreen() {
                         <Pressable
                           key={svc.id}
                           style={({ pressed }) => [styles.svcBtn, selected && { backgroundColor: Colors.accent + "30", borderColor: Colors.accent }, pressed && { opacity: 0.7 }]}
-                          onPress={() => {
-                            setSelectedServiceIds((ids) =>
-                              ids.includes(svc.id) ? ids.filter((i) => i !== svc.id) : [...ids, svc.id]
-                            );
-                          }}
+                          onPress={() => setSelectedServiceIds((ids) =>
+                            ids.includes(svc.id) ? ids.filter((i) => i !== svc.id) : [...ids, svc.id]
+                          )}
                         >
                           <Ionicons name="sparkles" size={16} color={selected ? Colors.accent : Colors.textMuted} />
                           <Text style={[styles.svcBtnText, selected && { color: Colors.accent }]}>{svc.name}</Text>
@@ -315,7 +335,7 @@ export default function AppointmentDetailScreen() {
                   ) : (
                     <Text style={styles.emptyText}>Sin servicios registrados</Text>
                   )}
-                  {!isDone && (
+                  {!isDone && !isNoShow && (
                     <Pressable style={styles.editLink} onPress={() => setServicesEditing(true)}>
                       <Ionicons name="pencil-outline" size={14} color={Colors.primary} />
                       <Text style={styles.editLinkText}>Editar servicios</Text>
@@ -327,7 +347,7 @@ export default function AppointmentDetailScreen() {
           )}
 
           {/* LASER PACKAGE */}
-          {appt.type === "LASER" && !isDone && (clientPackages?.length ?? 0) > 0 && (
+          {appt.type === "LASER" && !isDone && !isNoShow && (clientPackages?.length ?? 0) > 0 && (
             <SectionCard title="Paquete láser">
               {clientPackages?.map((cp) => {
                 const selected = selectedPackageId === cp.id;
@@ -341,10 +361,10 @@ export default function AppointmentDetailScreen() {
                       <Text style={[styles.pkgOptionName, selected && { color: Colors.secondary }]}>
                         Sesión {cp.usedSessions + 1} / {cp.totalSessions}
                       </Text>
-                      <Text style={styles.pkgOptionStatus}>{cp.status === "ACTIVE" ? "Activo" : cp.status}</Text>
+                      <Text style={styles.pkgOptionStatus}>{cp.status === "ACTIVE" ? "Activo" : "Terminado"}</Text>
                     </View>
                     <View style={styles.pkgProgress}>
-                      <View style={[styles.pkgProgressFill, { width: `${((cp.usedSessions) / cp.totalSessions) * 100}%` }]} />
+                      <View style={[styles.pkgProgressFill, { width: `${(cp.usedSessions / cp.totalSessions) * 100}%` }]} />
                     </View>
                     {selected && <Ionicons name="checkmark-circle" size={20} color={Colors.secondary} />}
                   </Pressable>
@@ -362,6 +382,7 @@ export default function AppointmentDetailScreen() {
                   value={notes}
                   onChangeText={setNotes}
                   placeholder="Agrega notas..."
+                  placeholderTextColor={Colors.textMuted}
                   multiline
                   autoFocus
                 />
@@ -381,7 +402,7 @@ export default function AppointmentDetailScreen() {
             ) : (
               <>
                 <Text style={styles.notesText}>{appt.notes || "Sin notas"}</Text>
-                {!isDone && (
+                {!isDone && !isNoShow && (
                   <Pressable style={styles.editLink} onPress={() => setEditingNotes(true)}>
                     <Ionicons name="pencil-outline" size={14} color={Colors.primary} />
                     <Text style={styles.editLinkText}>Editar notas</Text>
@@ -393,7 +414,7 @@ export default function AppointmentDetailScreen() {
 
           {/* PAYMENT */}
           {isDone && appt.payment ? (
-            <SectionCard title="Pago">
+            <SectionCard title="Pago registrado">
               <InfoRow label="Método" value={METHOD_LABELS[appt.payment.method]} />
               <InfoRow label="Total" value={`$${appt.payment.totalAmount}`} />
               {appt.type === "FACIAL" && (
@@ -402,8 +423,8 @@ export default function AppointmentDetailScreen() {
                   <InfoRow label="Facialista" value={`$${appt.payment.facialistNetAmount}`} />
                   {isOwnerOrAdmin && (
                     <View style={styles.paidToggle}>
-                      <Text style={styles.paidToggleLabel}>
-                        {appt.payment.facialistPaidFlag ? "Pagado a facialista" : "Pendiente de pago"}
+                      <Text style={[styles.paidToggleLabel, appt.payment.facialistPaidFlag && { color: Colors.success }]}>
+                        {appt.payment.facialistPaidFlag ? "✓ Pagado a facialista" : "⏳ Pendiente pago facialista"}
                       </Text>
                       {!appt.payment.facialistPaidFlag && (
                         <Pressable
@@ -414,83 +435,77 @@ export default function AppointmentDetailScreen() {
                           <Text style={styles.markPaidBtnText}>Marcar pagado</Text>
                         </Pressable>
                       )}
-                      {appt.payment.facialistPaidFlag && (
-                        <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
-                      )}
                     </View>
                   )}
                 </>
               )}
             </SectionCard>
-          ) : (
-            appt.status !== "CANCELLED" && appt.status !== "NO_SHOW" && (
-              <SectionCard title="Pago">
-                {!showPaymentForm ? (
-                  appt.status === "ARRIVED" || appt.status === "DONE" ? (
-                    <Pressable
-                      style={({ pressed }) => [styles.finishBtn, pressed && { opacity: 0.85 }]}
-                      onPress={() => setShowPaymentForm(true)}
-                    >
-                      <Ionicons name="card-outline" size={18} color="#fff" />
-                      <Text style={styles.finishBtnText}>Registrar pago y terminar</Text>
-                    </Pressable>
-                  ) : (
-                    <Text style={styles.emptyText}>Marca "Llegó" para registrar el pago</Text>
-                  )
+          ) : !isDone && !isNoShow && appt.status !== "CANCELLED" && (
+            <SectionCard title="Pago">
+              {!showPaymentForm ? (
+                appt.status === "ARRIVED" ? (
+                  <Pressable
+                    style={({ pressed }) => [styles.finishBtn, pressed && { opacity: 0.85 }]}
+                    onPress={() => setShowPaymentForm(true)}
+                  >
+                    <Ionicons name="card-outline" size={18} color="#fff" />
+                    <Text style={styles.finishBtnText}>Registrar pago y terminar</Text>
+                  </Pressable>
                 ) : (
-                  <>
-                    {appt.type === "LASER" && selectedPackageId ? (
-                      <View style={styles.includedBadge}>
-                        <Ionicons name="cube" size={16} color={Colors.secondary} />
-                        <Text style={styles.includedText}>Sesión incluida en paquete</Text>
-                      </View>
-                    ) : (
-                      <>
-                        <Text style={styles.fieldLabel}>Método de pago</Text>
-                        <View style={styles.methodRow}>
-                          {(["CASH", "CARD"] as const).map((m) => (
-                            <Pressable
-                              key={m}
-                              style={[styles.methodBtn, paymentMethod === m && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
-                              onPress={() => setPaymentMethod(m)}
-                            >
-                              <Ionicons name={m === "CASH" ? "cash-outline" : "card-outline"} size={16} color={paymentMethod === m ? "#fff" : Colors.textSecondary} />
-                              <Text style={[styles.methodBtnText, paymentMethod === m && { color: "#fff" }]}>
-                                {m === "CASH" ? "Efectivo" : "Tarjeta"}
-                              </Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                        <Text style={styles.fieldLabel}>Monto total ($)</Text>
-                        <TextInput
-                          style={styles.amountInput}
-                          value={paymentAmount}
-                          onChangeText={setPaymentAmount}
-                          keyboardType="numeric"
-                          placeholder="0"
-                          placeholderTextColor={Colors.textMuted}
-                        />
-                      </>
-                    )}
-                    <View style={styles.editBtns}>
-                      <Pressable style={styles.cancelEditBtn} onPress={() => setShowPaymentForm(false)}>
-                        <Text style={styles.cancelEditBtnText}>Cancelar</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.saveEditBtn, paymentMutation.isPending && { opacity: 0.5 }]}
-                        onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); paymentMutation.mutate(); }}
-                        disabled={paymentMutation.isPending}
-                      >
-                        {paymentMutation.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveEditBtnText}>Confirmar</Text>}
-                      </Pressable>
+                  <Text style={styles.emptyText}>Marca "Llegó" para registrar el pago</Text>
+                )
+              ) : (
+                <>
+                  {appt.type === "LASER" && selectedPackageId ? (
+                    <View style={styles.includedBadge}>
+                      <Ionicons name="cube" size={16} color={Colors.secondary} />
+                      <Text style={styles.includedText}>Sesión incluida en paquete</Text>
                     </View>
-                  </>
-                )}
-              </SectionCard>
-            )
+                  ) : (
+                    <>
+                      <Text style={styles.fieldLabel}>Método de pago</Text>
+                      <View style={styles.methodRow}>
+                        {(["CASH", "CARD"] as const).map((m) => (
+                          <Pressable
+                            key={m}
+                            style={[styles.methodBtn, paymentMethod === m && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
+                            onPress={() => setPaymentMethod(m)}
+                          >
+                            <Ionicons name={m === "CASH" ? "cash-outline" : "card-outline"} size={16} color={paymentMethod === m ? "#fff" : Colors.textSecondary} />
+                            <Text style={[styles.methodBtnText, paymentMethod === m && { color: "#fff" }]}>
+                              {m === "CASH" ? "Efectivo" : "Tarjeta"}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <Text style={styles.fieldLabel}>Monto total ($)</Text>
+                      <TextInput
+                        style={styles.amountInput}
+                        value={paymentAmount}
+                        onChangeText={setPaymentAmount}
+                        keyboardType="numeric"
+                        placeholder="0"
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                    </>
+                  )}
+                  <View style={styles.editBtns}>
+                    <Pressable style={styles.cancelEditBtn} onPress={() => setShowPaymentForm(false)}>
+                      <Text style={styles.cancelEditBtnText}>Cancelar</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.saveEditBtn, paymentMutation.isPending && { opacity: 0.5 }]}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); paymentMutation.mutate(); }}
+                      disabled={paymentMutation.isPending}
+                    >
+                      {paymentMutation.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveEditBtnText}>Confirmar pago</Text>}
+                    </Pressable>
+                  </View>
+                </>
+              )}
+            </SectionCard>
           )}
 
-          {/* NAVIGATE TO CLIENT */}
           <Pressable
             style={({ pressed }) => [styles.clientBtn, pressed && { opacity: 0.7 }]}
             onPress={() => router.push(`/client/${appt.clientId}`)}
@@ -513,15 +528,15 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 8 },
   headerTitle: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
   topBanner: { marginHorizontal: 16, marginBottom: 12, borderRadius: 16, padding: 18, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  topBannerLeft: { gap: 3 },
-  bannerType: { fontFamily: "Nunito_700Bold", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 },
+  topBannerLeft: { gap: 3, flex: 1 },
+  bannerType: { fontFamily: "Nunito_700Bold", fontSize: 11, letterSpacing: 1 },
   bannerClient: { fontFamily: "Nunito_800ExtraBold", fontSize: 20, color: Colors.text },
   bannerTime: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.text },
   bannerDate: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textSecondary, textTransform: "capitalize" },
   statusBadgeLarge: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1 },
   statusBadgeLargeText: { fontFamily: "Nunito_700Bold", fontSize: 12 },
   content: { paddingHorizontal: 16, gap: 12 },
-  card: { backgroundColor: "#fff", borderRadius: 16, padding: 16, gap: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+  card: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 10, borderWidth: 1, borderColor: Colors.border },
   cardTitle: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.text, marginBottom: 4 },
   infoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   infoLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary },
@@ -529,8 +544,20 @@ const styles = StyleSheet.create({
   packageBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.secondary + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginTop: 4 },
   packageBadgeText: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.secondary },
   actionRow: { flexDirection: "row", gap: 8 },
-  actionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 12 },
-  actionBtnText: { fontFamily: "Nunito_700Bold", fontSize: 13 },
+  actionBtn: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 12, borderRadius: 12 },
+  actionBtnText: { fontFamily: "Nunito_700Bold", fontSize: 12 },
+  noShowText: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary },
+  reagendarBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingVertical: 13,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  reagendarBtnText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: "#fff" },
   serviceGrid: { gap: 8 },
   svcBtn: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 12, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.background },
   svcBtnText: { flex: 1, fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.textSecondary },
@@ -548,25 +575,25 @@ const styles = StyleSheet.create({
   notesText: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary, lineHeight: 20 },
   editLink: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   editLinkText: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.primary },
-  editBtns: { flexDirection: "row", gap: 8, marginTop: 8 },
-  cancelEditBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
-  cancelEditBtnText: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.textSecondary },
-  saveEditBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.primary, alignItems: "center" },
-  saveEditBtnText: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: "#fff" },
-  fieldLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary },
-  methodRow: { flexDirection: "row", gap: 8 },
-  methodBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 10, borderWidth: 2, borderColor: Colors.border, backgroundColor: "#fff" },
+  editBtns: { flexDirection: "row", gap: 10, marginTop: 4 },
+  cancelEditBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: Colors.surface2, alignItems: "center", borderWidth: 1, borderColor: Colors.border },
+  cancelEditBtnText: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.textSecondary },
+  saveEditBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: Colors.primary, alignItems: "center" },
+  saveEditBtnText: { fontFamily: "Nunito_700Bold", fontSize: 14, color: "#fff" },
+  fieldLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary, marginBottom: 6 },
+  methodRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
+  methodBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.surface2 },
   methodBtnText: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.textSecondary },
-  amountInput: { backgroundColor: Colors.background, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
-  finishBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 14, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-  finishBtnText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: "#fff" },
+  amountInput: { backgroundColor: Colors.background, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text, marginBottom: 4 },
   includedBadge: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.secondary + "15", borderRadius: 10, padding: 12 },
   includedText: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.secondary },
   paidToggle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
   paidToggleLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary },
-  markPaidBtn: { backgroundColor: Colors.success, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  markPaidBtnText: { fontFamily: "Nunito_700Bold", fontSize: 12, color: "#fff" },
-  emptyText: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textMuted },
-  clientBtn: { backgroundColor: "#fff", borderRadius: 14, flexDirection: "row", alignItems: "center", padding: 14, gap: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+  markPaidBtn: { backgroundColor: Colors.success + "20", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  markPaidBtnText: { fontFamily: "Nunito_700Bold", fontSize: 12, color: Colors.success },
+  finishBtn: { backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  finishBtnText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: "#fff" },
+  clientBtn: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surface, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: Colors.border },
   clientBtnText: { flex: 1, fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.primary },
+  emptyText: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textMuted, fontStyle: "italic" },
 });

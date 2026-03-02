@@ -5,7 +5,7 @@ import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
-import { getApiUrl } from "@/lib/query-client";
+import { getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 
 function monthName(month: number) {
@@ -23,7 +23,7 @@ export default function ReportsScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/reports/income?month=${month}&year=${year}`, base);
-      const res = await fetch(url.toString(), { credentials: "include" });
+      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${getAuthToken() || ""}` } });
       return res.json() as Promise<any>;
     },
   });

@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import { apiRequest } from "@/lib/query-client";
 import * as Haptics from "expo-haptics";
+import { useAuth } from "@/contexts/auth";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -29,6 +30,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function NewClientScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const { canViewClinical } = useAuth();
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -51,8 +53,26 @@ export default function NewClientScreen() {
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["/api/clients"] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.back();
-      router.push(`/client/${data.id}`);
+      if (canViewClinical) {
+        Alert.alert(
+          "Cliente creada",
+          `¿Deseas agregar la historia clínica de ${data.fullName} ahora?`,
+          [
+            {
+              text: "Ahora no",
+              style: "cancel",
+              onPress: () => { router.back(); router.push(`/client/${data.id}`); },
+            },
+            {
+              text: "Agregar historia",
+              onPress: () => { router.back(); router.push(`/client/${data.id}?tab=clinical`); },
+            },
+          ]
+        );
+      } else {
+        router.back();
+        router.push(`/client/${data.id}`);
+      }
     },
     onError: (err: Error) => Alert.alert("Error", err.message),
   });
@@ -69,19 +89,47 @@ export default function NewClientScreen() {
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Field label="Nombre completo *">
-          <TextInput style={styles.input} value={fullName} onChangeText={setFullName} placeholder="Nombre y apellidos" placeholderTextColor={Colors.textMuted} />
+          <TextInput
+            style={styles.input}
+            value={fullName}
+            onChangeText={setFullName}
+            placeholder="Nombre y apellidos"
+            placeholderTextColor={Colors.textMuted}
+          />
         </Field>
 
         <Field label="Teléfono *">
-          <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="555-1234" placeholderTextColor={Colors.textMuted} keyboardType="phone-pad" />
+          <TextInput
+            style={styles.input}
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="555-1234"
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="phone-pad"
+          />
         </Field>
 
         <Field label="Correo electrónico">
-          <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="correo@ejemplo.com" placeholderTextColor={Colors.textMuted} keyboardType="email-address" autoCapitalize="none" />
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="correo@ejemplo.com"
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
         </Field>
 
-        <Field label="Fecha de nacimiento">
-          <TextInput style={styles.input} value={birthDate} onChangeText={setBirthDate} placeholder="YYYY-MM-DD" placeholderTextColor={Colors.textMuted} keyboardType="numeric" />
+        <Field label="Fecha de nacimiento (YYYY-MM-DD)">
+          <TextInput
+            style={styles.input}
+            value={birthDate}
+            onChangeText={setBirthDate}
+            placeholder="1990-05-15"
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="numeric"
+          />
         </Field>
 
         <Field label="Sexo">
@@ -99,11 +147,17 @@ export default function NewClientScreen() {
         </Field>
 
         <Field label="Ocupación">
-          <TextInput style={styles.input} value={occupation} onChangeText={setOccupation} placeholder="Profesión u ocupación" placeholderTextColor={Colors.textMuted} />
+          <TextInput
+            style={styles.input}
+            value={occupation}
+            onChangeText={setOccupation}
+            placeholder="Profesión u ocupación"
+            placeholderTextColor={Colors.textMuted}
+          />
         </Field>
 
         <Pressable
-          style={({ pressed }) => [styles.saveBtn, !fullName.trim() || !phone.trim() ? { opacity: 0.5 } : {}, pressed && { opacity: 0.85 }]}
+          style={({ pressed }) => [styles.saveBtn, (!fullName.trim() || !phone.trim()) && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
           onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); createMutation.mutate(); }}
           disabled={!fullName.trim() || !phone.trim() || createMutation.isPending}
         >
@@ -122,10 +176,10 @@ const styles = StyleSheet.create({
   scroll: { flex: 1, paddingHorizontal: 20 },
   field: { marginBottom: 16 },
   fieldLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary, marginBottom: 6 },
-  input: { backgroundColor: "#fff", borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 15, color: Colors.text },
+  input: { backgroundColor: Colors.surface, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 15, color: Colors.text },
   sexRow: { flexDirection: "row", gap: 10 },
-  sexBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 2, borderColor: Colors.border, backgroundColor: "#fff", alignItems: "center" },
+  sexBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.surface, alignItems: "center" },
   sexBtnText: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.textSecondary },
-  saveBtn: { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16, alignItems: "center", marginTop: 8, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  saveBtn: { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16, alignItems: "center", marginTop: 8 },
   saveBtnText: { fontFamily: "Nunito_700Bold", fontSize: 16, color: "#fff" },
 });
