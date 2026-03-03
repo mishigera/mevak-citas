@@ -108,6 +108,7 @@ export interface LaserSession {
   clientPackageId?: string;
   sessionNumber?: number;
   areasSnapshotJson?: string[];
+  powerByArea?: Record<string, string | number>;
   notes?: string;
 }
 
@@ -182,18 +183,29 @@ class MemStorage {
     this.packages.set(pkg.id, pkg);
 
     const laserAreas: LaserArea[] = [
-      { id: randomUUID(), name: "Axilas", bodySide: "both", bodyRegion: "torso", svgKey: "axilas", isActive: true },
-      { id: randomUUID(), name: "Bikini Clásico", bodySide: "front", bodyRegion: "pelvis", svgKey: "bikini_clasico", isActive: true },
-      { id: randomUUID(), name: "Bikini Completo", bodySide: "front", bodyRegion: "pelvis", svgKey: "bikini_completo", isActive: true },
-      { id: randomUUID(), name: "Piernas Completas", bodySide: "both", bodyRegion: "legs", svgKey: "piernas_completas", isActive: true },
-      { id: randomUUID(), name: "Medias Piernas", bodySide: "both", bodyRegion: "legs", svgKey: "medias_piernas", isActive: true },
+      { id: randomUUID(), name: "Cuello", bodySide: "front", bodyRegion: "torso", svgKey: "cuello", isActive: true },
+      { id: randomUUID(), name: "Nuca", bodySide: "back", bodyRegion: "torso", svgKey: "nuca", isActive: true },
+      { id: randomUUID(), name: "Axila", bodySide: "both", bodyRegion: "torso", svgKey: "axila", isActive: true },
       { id: randomUUID(), name: "Brazos", bodySide: "both", bodyRegion: "arms", svgKey: "brazos", isActive: true },
-      { id: randomUUID(), name: "Labio Superior", bodySide: "front", bodyRegion: "face", svgKey: "labio_superior", isActive: true },
-      { id: randomUUID(), name: "Mentón", bodySide: "front", bodyRegion: "face", svgKey: "menton", isActive: true },
-      { id: randomUUID(), name: "Espalda Alta", bodySide: "back", bodyRegion: "torso", svgKey: "espalda_alta", isActive: true },
-      { id: randomUUID(), name: "Espalda Completa", bodySide: "back", bodyRegion: "torso", svgKey: "espalda_completa", isActive: true },
       { id: randomUUID(), name: "Abdomen", bodySide: "front", bodyRegion: "torso", svgKey: "abdomen", isActive: true },
+      { id: randomUUID(), name: "Línea de abdomen", bodySide: "front", bodyRegion: "torso", svgKey: "linea_abdomen", isActive: true },
+      { id: randomUUID(), name: "Manos", bodySide: "both", bodyRegion: "arms", svgKey: "manos", isActive: true },
+      { id: randomUUID(), name: "Muslo", bodySide: "both", bodyRegion: "legs", svgKey: "muslo", isActive: true },
+      { id: randomUUID(), name: "Área del bikini", bodySide: "front", bodyRegion: "pelvis", svgKey: "area_bikini", isActive: true },
+      { id: randomUUID(), name: "Media pierna", bodySide: "both", bodyRegion: "legs", svgKey: "media_pierna", isActive: true },
+      { id: randomUUID(), name: "Pies", bodySide: "both", bodyRegion: "legs", svgKey: "pies", isActive: true },
+      { id: randomUUID(), name: "Espalda", bodySide: "back", bodyRegion: "torso", svgKey: "espalda", isActive: true },
+      { id: randomUUID(), name: "Espalda baja", bodySide: "back", bodyRegion: "torso", svgKey: "espalda_baja", isActive: true },
+      { id: randomUUID(), name: "Línea interglútea", bodySide: "back", bodyRegion: "pelvis", svgKey: "linea_interglutea", isActive: true },
       { id: randomUUID(), name: "Glúteos", bodySide: "back", bodyRegion: "pelvis", svgKey: "gluteos", isActive: true },
+      { id: randomUUID(), name: "Frente", bodySide: "front", bodyRegion: "face", svgKey: "frente", isActive: true },
+      { id: randomUUID(), name: "Entrecejo", bodySide: "front", bodyRegion: "face", svgKey: "entrecejo", isActive: true },
+      { id: randomUUID(), name: "Mejillas", bodySide: "front", bodyRegion: "face", svgKey: "mejillas", isActive: true },
+      { id: randomUUID(), name: "Media cara", bodySide: "front", bodyRegion: "face", svgKey: "media_cara", isActive: true },
+      { id: randomUUID(), name: "Mentón", bodySide: "front", bodyRegion: "face", svgKey: "menton", isActive: true },
+      { id: randomUUID(), name: "Oídos", bodySide: "front", bodyRegion: "face", svgKey: "oidos", isActive: true },
+      { id: randomUUID(), name: "Patillas", bodySide: "front", bodyRegion: "face", svgKey: "patillas", isActive: true },
+      { id: randomUUID(), name: "Bigote", bodySide: "front", bodyRegion: "face", svgKey: "bigote", isActive: true },
     ];
     laserAreas.forEach(a => this.laserAreas.set(a.id, a));
 
@@ -218,7 +230,13 @@ class MemStorage {
     const cp: ClientPackage = { id: randomUUID(), clientId: clients[1].id, packageId: pkg.id, totalSessions: 10, usedSessions: 3, remainingSessions: 7, startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), status: "ACTIVE" };
     this.clientPackages.set(cp.id, cp);
 
-    const ls: LaserSession = { id: randomUUID(), appointmentId: appt2.id, clientPackageId: cp.id, sessionNumber: 4, areasSnapshotJson: [laserAreas[0].svgKey, laserAreas[3].svgKey] };
+    const ls: LaserSession = {
+      id: randomUUID(),
+      appointmentId: appt2.id,
+      clientPackageId: cp.id,
+      sessionNumber: 4,
+      areasSnapshotJson: ["axila", "media_pierna", "bigote"],
+    };
     this.laserSessions.set(ls.id, ls);
 
     const clinical: ClinicalProfile = { id: randomUUID(), clientId: clients[1].id, allergiesFlag: false, conditionsJson: { diabetes: false, hipertension: true, renales: false, cardiacas: false, circulatorias: false, digestivas: false, pulmonares: false, endocrinas: false, neurologicas: false, hematologicas: false, dermatologicas: false, otrosText: "" }, phototype: 2, eyeColor: "café", hairColor: "negro" };

@@ -75,8 +75,12 @@ export default function MoreScreen() {
         text: "Cerrar sesión",
         style: "destructive",
         onPress: async () => {
-          await logout();
-          router.replace("/login");
+          try {
+            await logout();
+          } finally {
+            router.dismissAll();
+            router.replace("/login");
+          }
         },
       },
     ]);

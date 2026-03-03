@@ -19,6 +19,7 @@ import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
+import { LaserBodyMap } from "@/components/LaserBodyMap";
 
 const PHOTOTYPES = [
   { num: 1, skin: "#FDECD0", desc: "Siempre se quema, nunca se broncea. Muy blanca." },
@@ -84,6 +85,7 @@ export default function ClientDetailScreen() {
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [clinical, setClinical] = useState<any>(null);
   const [clinicalEditing, setClinicalEditing] = useState(tabParam === "clinical" && canViewClinical);
+  const [selectedLaserSvgKeys, setSelectedLaserSvgKeys] = useState<string[]>([]);
 
   const { data: client, isLoading } = useQuery<any>({
     queryKey: ["/api/clients", id],
@@ -117,6 +119,30 @@ export default function ClientDetailScreen() {
     },
   });
 
+  const { data: laserAreas = [] } = useQuery<any[]>({
+    queryKey: ["/api/laser-areas"],
+    enabled: role === "ADMIN" || role === "OWNER",
+    queryFn: async () => {
+      const base = getApiUrl();
+      const url = new URL("/api/laser-areas", base);
+      const res = await fetch(url.toString(), { headers: authH() });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const { data: clientLaserSelections = [] } = useQuery<any[]>({
+    queryKey: ["/api/clients", id, "laser-areas"],
+    enabled: role === "ADMIN" || role === "OWNER",
+    queryFn: async () => {
+      const base = getApiUrl();
+      const url = new URL(`/api/clients/${id}/laser-areas`, base);
+      const res = await fetch(url.toString(), { headers: authH() });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
   const { data: clinicalData } = useQuery<any>({
     queryKey: ["/api/clients", id, "clinical"],
     enabled: canViewClinical,
@@ -144,6 +170,43 @@ export default function ClientDetailScreen() {
     },
     onError: (err: Error) => Alert.alert("Error", err.message),
   });
+
+  useEffect(() => {
+    if (!laserAreas.length) {
+      setSelectedLaserSvgKeys([]);
+      return;
+    }
+    const byId = new Map(laserAreas.map((a: any) => [a.id, a.svgKey]));
+    const next = (clientLaserSelections || [])
+      .map((selection: any) => byId.get(selection.areaId))
+      .filter(Boolean) as string[];
+    setSelectedLaserSvgKeys(next);
+  }, [laserAreas, clientLaserSelections]);
+
+  const saveLaserAreasMutation = useMutation({
+    mutationFn: async (svgKeys: string[]) => {
+      const selectedIdSet = new Set(svgKeys);
+      const areaIds = (laserAreas || [])
+        .filter((area: any) => selectedIdSet.has(area.svgKey))
+        .map((area: any) => area.id);
+      await apiRequest("PUT", `/api/clients/${id}/laser-areas`, { areaIds });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/clients", id, "laser-areas"] });
+      qc.invalidateQueries({ queryKey: ["/api/appointments"] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: Error) => Alert.alert("Error", err.message),
+  });
+
+  const toggleLaserArea = (svgKey: string) => {
+    if (!(role === "ADMIN" || role === "OWNER")) return;
+    const next = selectedLaserSvgKeys.includes(svgKey)
+      ? selectedLaserSvgKeys.filter((key) => key !== svgKey)
+      : [...selectedLaserSvgKeys, svgKey];
+    setSelectedLaserSvgKeys(next);
+    saveLaserAreasMutation.mutate(next);
+  };
 
   const facialAppts = useMemo(() => (appointments || []).filter((a) => a.type === "FACIAL"), [appointments]);
   const laserAppts = useMemo(() => (appointments || []).filter((a) => a.type === "LASER"), [appointments]);
@@ -237,6 +300,18 @@ export default function ClientDetailScreen() {
   function renderLaser() {
     return (
       <View style={styles.tabContent}>
+        {(role === "ADMIN" || role === "OWNER") && (
+          <View style={styles.card}>
+            <LaserBodyMap
+              areas={laserAreas}
+              selectedSvgKeys={selectedLaserSvgKeys}
+              onToggleArea={toggleLaserArea}
+              readOnly={saveLaserAreasMutation.isPending}
+              title="Áreas láser de la clienta"
+            />
+          </View>
+        )}
+
         {(packages || []).map((cp: any) => (
           <View key={cp.id} style={styles.card}>
             <Text style={styles.cardTitle}>Paquete láser</Text>
@@ -438,7 +513,7 @@ export default function ClientDetailScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/clients"))} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </Pressable>
         <View style={styles.headerAvatar}>

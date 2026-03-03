@@ -44,7 +44,7 @@ export default function PendingPaymentsScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} hitSlop={12}>
           <Ionicons name="close" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.title}>Pagos pendientes</Text>

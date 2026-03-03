@@ -61,17 +61,16 @@ export default function NewClientScreen() {
             {
               text: "Ahora no",
               style: "cancel",
-              onPress: () => { router.back(); router.push(`/client/${data.id}`); },
+              onPress: () => { router.replace(`/client/${data.id}`); },
             },
             {
               text: "Agregar historia",
-              onPress: () => { router.back(); router.push(`/client/${data.id}?tab=clinical`); },
+              onPress: () => { router.replace(`/client/${data.id}?tab=clinical`); },
             },
           ]
         );
       } else {
-        router.back();
-        router.push(`/client/${data.id}`);
+        router.replace(`/client/${data.id}`);
       }
     },
     onError: (err: Error) => Alert.alert("Error", err.message),
@@ -80,7 +79,7 @@ export default function NewClientScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/clients"))} hitSlop={12}>
           <Ionicons name="close" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.title}>Nuevo cliente</Text>

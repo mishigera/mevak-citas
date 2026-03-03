@@ -1,10 +1,26 @@
 import { fetch } from "expo/fetch";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+function toBaseUrl(raw: string): string {
+  const value = raw.trim();
+  if (!value) throw new Error("API URL is empty");
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    return new URL(value).href;
+  }
+  return new URL(`https://${value}`).href;
+}
+
 export function getApiUrl(): string {
-  let host = process.env.EXPO_PUBLIC_DOMAIN;
-  if (!host) throw new Error("EXPO_PUBLIC_DOMAIN is not set");
-  return new URL(`https://${host}`).href;
+  const explicitApiUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (explicitApiUrl) return toBaseUrl(explicitApiUrl);
+
+  const domain = process.env.EXPO_PUBLIC_DOMAIN;
+  if (domain) return toBaseUrl(domain);
+
+  const browserHost = (globalThis as { location?: { hostname?: string } }).location?.hostname;
+  if (browserHost) return `http://${browserHost}:5050/`;
+
+  return "http://localhost:5050/";
 }
 
 let _authToken: string | null = null;

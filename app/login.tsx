@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Image,
 } from "react-native";
 import { Redirect, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -47,7 +48,7 @@ export default function LoginScreen() {
   };
 
   return (
-    <LinearGradient colors={["#FAF4F0", "#F5E6E8", "#EDD5D8"]} style={styles.gradient}>
+    <LinearGradient colors={["#FFFFFF", "#FFFFFF", "#FFFFFF"]} style={styles.gradient}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <ScrollView
           contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 }]}
@@ -56,7 +57,7 @@ export default function LoginScreen() {
         >
           <View style={styles.logoContainer}>
             <View style={styles.logoCircle}>
-              <Ionicons name="flower-outline" size={40} color={Colors.primary} />
+              <Image source={require("../assets/icon/logomevak.png")} style={styles.logoImage} resizeMode="contain" />
             </View>
             <Text style={styles.brandName}>Beauty Center</Text>
             <Text style={styles.brandSub}>Sistema de gestión</Text>
@@ -150,6 +151,10 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
     marginBottom: 16,
+  },
+  logoImage: {
+    width: 56,
+    height: 56,
   },
   brandName: { fontFamily: "Nunito_800ExtraBold", fontSize: 28, color: Colors.text },
   brandSub: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary, marginTop: 4 },

@@ -348,6 +348,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     storage.payments.set(payment.id, payment);
     appt.status = "DONE";
     storage.appointments.set(appt.id, appt);
+
+    if (appt.type === "LASER") {
+      const clientSelectionAreaIds = Array.from(storage.clientLaserSelections.values())
+        .filter((selection) => selection.clientId === appt.clientId)
+        .map((selection) => selection.areaId);
+
+      const areasSnapshotJson = clientSelectionAreaIds
+        .map((areaId) => storage.laserAreas.get(areaId)?.svgKey)
+        .filter(Boolean) as string[];
+
+      const existingSession = Array.from(storage.laserSessions.values()).find((session) => session.appointmentId === appt.id);
+      if (existingSession) {
+        existingSession.areasSnapshotJson = areasSnapshotJson;
+        if (req.body.clientPackageId) existingSession.clientPackageId = req.body.clientPackageId;
+        storage.laserSessions.set(existingSession.id, existingSession);
+      } else {
+        const session = {
+          id: randomUUID(),
+          appointmentId: appt.id,
+          clientPackageId: req.body.clientPackageId,
+          areasSnapshotJson,
+        };
+        storage.laserSessions.set(session.id, session);
+      }
+    }
+
     if (req.body.clientPackageId) {
       const cp = storage.clientPackages.get(req.body.clientPackageId);
       if (cp) { cp.usedSessions += 1; cp.remainingSessions = cp.totalSessions - cp.usedSessions; if (cp.remainingSessions <= 0) cp.status = "FINISHED"; storage.clientPackages.set(cp.id, cp); }
@@ -398,6 +424,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/blocks", requireRole("ADMIN", "OWNER", "FACIALIST"), (req, res) => {
     const { startDateTime, endDateTime, reason } = req.body;
     if (!startDateTime || !endDateTime) return res.status(400).json({ message: "Faltan fechas" });
+    const start = new Date(startDateTime).getTime();
+    const end = new Date(endDateTime).getTime();
+    if (Number.isNaN(start) || Number.isNaN(end)) return res.status(400).json({ message: "Formato de fecha inválido" });
+    if (end <= start) return res.status(400).json({ message: "La fecha/hora de fin debe ser mayor a inicio" });
     const block = { id: randomUUID(), userId: req.userId!, startDateTime, endDateTime, reason };
     storage.availabilityBlocks.set(block.id, block);
     res.status(201).json(block);
@@ -420,7 +450,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const staff = storage.users.get(a.staffId);
         const services = Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === a.id).map((s) => storage.services.get(s.serviceId)).filter(Boolean);
         const payment = Array.from(storage.payments.values()).find((p) => p.appointmentId === a.id);
-        return { ...a, staff: staff ? { id: staff.id, name: staff.name } : null, services, payment };
+        const laserSession = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === a.id) || null;
+        return { ...a, staff: staff ? { id: staff.id, name: staff.name } : null, services, payment, laserSession };
       });
     res.json(appts);
   });

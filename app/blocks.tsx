@@ -46,8 +46,8 @@ export default function BlocksScreen() {
   const createMutation = useMutation({
     mutationFn: async () => {
       await apiRequest("POST", "/api/blocks", {
-        startDateTime: `${startDate}T${startTime}:00.000Z`,
-        endDateTime: `${endDate}T${endTime}:00.000Z`,
+        startDateTime: `${startDate}T${startTime}:00`,
+        endDateTime: `${endDate}T${endTime}:00`,
         reason: reason.trim() || undefined,
       });
     },
@@ -78,7 +78,7 @@ export default function BlocksScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} hitSlop={12}>
           <Ionicons name="close" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.title}>Mis bloqueos</Text>

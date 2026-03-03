@@ -39,10 +39,10 @@ export default function NewAppointmentScreen() {
 
   const [clientId, setClientId] = useState<string>(params.clientId as string || "");
   const [clientName, setClientName] = useState<string>(params.clientName as string || "");
-  const [staffId, setStaffId] = useState<string>("");
-  const [staffName, setStaffName] = useState<string>("");
-  const [type, setType] = useState<"FACIAL" | "LASER">("FACIAL");
-  const [date, setDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [staffId, setStaffId] = useState<string>(params.staffId as string || "");
+  const [staffName, setStaffName] = useState<string>(params.staffName as string || "");
+  const [type, setType] = useState<"FACIAL" | "LASER">((params.type as "FACIAL" | "LASER") || "FACIAL");
+  const [date, setDate] = useState<string>((params.date as string) || new Date().toISOString().split("T")[0]);
   const [startTime, setStartTime] = useState<string>("10:00");
   const [endTime, setEndTime] = useState<string>("11:00");
   const [notes, setNotes] = useState<string>("");
@@ -74,8 +74,8 @@ export default function NewAppointmentScreen() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const dateTimeStart = `${date}T${startTime}:00.000Z`;
-      const dateTimeEnd = `${date}T${endTime}:00.000Z`;
+      const dateTimeStart = `${date}T${startTime}:00`;
+      const dateTimeEnd = `${date}T${endTime}:00`;
       const res = await apiRequest("POST", "/api/appointments", {
         dateTimeStart,
         dateTimeEnd,
@@ -166,7 +166,7 @@ export default function NewAppointmentScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/calendar"))} hitSlop={12}>
           <Ionicons name="close" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.title}>Nueva cita</Text>

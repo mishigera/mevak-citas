@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { apiRequest, setAuthToken, getApiUrl } from "@/lib/query-client";
+import { apiRequest, setAuthToken, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 
 export type Role = "ADMIN" | "OWNER" | "RECEPTION" | "FACIALIST";
@@ -73,13 +73,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    try {
-      await apiRequest("POST", "/api/auth/logout", {});
-    } catch {}
+    const token = getAuthToken();
     setAuthToken(null);
     setUser(null);
     await AsyncStorage.removeItem("auth_token");
     await AsyncStorage.removeItem("auth_user");
+
+    if (!token) return;
+
+    try {
+      setAuthToken(token);
+      await apiRequest("POST", "/api/auth/logout", {});
+    } catch {}
+    setAuthToken(null);
   };
 
   const value = useMemo<AuthContextValue>(() => ({

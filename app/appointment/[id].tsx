@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
+  Modal,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
@@ -18,6 +19,7 @@ import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
+import { LaserBodyMap } from "@/components/LaserBodyMap";
 
 const STATUS_LABELS: Record<string, string> = {
   SCHEDULED: "Agendada",
@@ -75,6 +77,9 @@ export default function AppointmentDetailScreen() {
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
   const [servicesEditing, setServicesEditing] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showLaserPowerModal, setShowLaserPowerModal] = useState(false);
+  const [powerByArea, setPowerByArea] = useState<Record<string, string>>({});
 
   const { data: appt, isLoading, refetch } = useQuery<any>({
     queryKey: ["/api/appointments", id],
@@ -88,7 +93,26 @@ export default function AppointmentDetailScreen() {
       const svcs = data.services?.map((s: any) => s?.id).filter(Boolean) || [];
       setSelectedServiceIds(svcs);
       if (data.laserSession?.clientPackageId) setSelectedPackageId(data.laserSession.clientPackageId);
+      if (data.laserSession?.powerByArea) {
+        const nextPower: Record<string, string> = {};
+        Object.entries(data.laserSession.powerByArea as Record<string, unknown>).forEach(([area, value]) => {
+          if (value !== null && value !== undefined) nextPower[area] = String(value);
+        });
+        setPowerByArea(nextPower);
+      }
       return data;
+    },
+  });
+
+  const { data: historyAppts } = useQuery<any[]>({
+    queryKey: ["/api/clients", appt?.clientId, "appointments"],
+    enabled: showHistoryModal && !!appt?.clientId,
+    queryFn: async () => {
+      const base = getApiUrl();
+      const url = new URL(`/api/clients/${appt.clientId}/appointments`, base);
+      const res = await fetch(url.toString(), { headers: authHeaders() });
+      if (!res.ok) throw new Error("Error al cargar historial");
+      return res.json() as Promise<any[]>;
     },
   });
 
@@ -110,6 +134,30 @@ export default function AppointmentDetailScreen() {
       const base = getApiUrl();
       const url = new URL(`/api/clients/${appt.clientId}/packages`, base);
       const res = await fetch(url.toString(), { headers: authHeaders() });
+      return res.json();
+    },
+  });
+
+  const { data: laserAreas = [] } = useQuery<any[]>({
+    queryKey: ["/api/laser-areas"],
+    enabled: appt?.type === "LASER",
+    queryFn: async () => {
+      const base = getApiUrl();
+      const url = new URL("/api/laser-areas", base);
+      const res = await fetch(url.toString(), { headers: authHeaders() });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const { data: clientLaserSelections = [] } = useQuery<any[]>({
+    queryKey: ["/api/clients", appt?.clientId, "laser-areas"],
+    enabled: appt?.type === "LASER" && !!appt?.clientId,
+    queryFn: async () => {
+      const base = getApiUrl();
+      const url = new URL(`/api/clients/${appt.clientId}/laser-areas`, base);
+      const res = await fetch(url.toString(), { headers: authHeaders() });
+      if (!res.ok) return [];
       return res.json();
     },
   });
@@ -146,12 +194,6 @@ export default function AppointmentDetailScreen() {
         totalAmount: amount,
         clientPackageId: selectedPackageId || undefined,
       });
-      if (selectedPackageId) {
-        await apiRequest("PUT", `/api/appointments/${id}/laser-session`, {
-          clientPackageId: selectedPackageId,
-          areasSnapshotJson: [],
-        });
-      }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/appointments"] }); refetch(); setShowPaymentForm(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); },
     onError: (err: Error) => Alert.alert("Error", err.message),
@@ -164,10 +206,59 @@ export default function AppointmentDetailScreen() {
     onSuccess: () => { refetch(); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); },
   });
 
+  const saveLaserPowerMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("PUT", `/api/appointments/${id}/laser-session`, {
+        powerByArea,
+      });
+    },
+    onSuccess: () => {
+      refetch();
+      qc.invalidateQueries({ queryKey: ["/api/clients", appt?.clientId, "appointments"] });
+      setShowLaserPowerModal(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: Error) => Alert.alert("Error", err.message),
+  });
+
   const handleReSchedule = () => {
     if (!appt) return;
     const dateStr = appt.dateTimeStart.split("T")[0];
     router.push(`/appointment/new?clientId=${appt.clientId}&staffId=${appt.staffId}&type=${appt.type}&date=${dateStr}`);
+  };
+
+  const handleStatusChange = (nextStatus: "ARRIVED" | "NO_SHOW" | "CANCELLED") => {
+    if (nextStatus === "ARRIVED") {
+      updateStatusMutation.mutate("ARRIVED");
+      return;
+    }
+
+    const doChange = () => {
+      updateStatusMutation.mutate(nextStatus, {
+        onSuccess: () => {
+          Alert.alert(
+            nextStatus === "NO_SHOW" ? "No llegó" : "Cita cancelada",
+            "¿Deseas reagendar esta cita?",
+            [
+              { text: "No", style: "cancel" },
+              { text: "Sí, reagendar", onPress: handleReSchedule },
+            ],
+          );
+        },
+      });
+    };
+
+    const title = nextStatus === "NO_SHOW" ? "No llegó" : "Cancelar cita";
+    const message = appt?.status === "ARRIVED"
+      ? "Esta cita ya está marcada como 'Llegó'. ¿Deseas cambiar la selección?"
+      : nextStatus === "NO_SHOW"
+        ? "¿La clienta no llegó?"
+        : "¿Confirmas cancelar esta cita?";
+
+    Alert.alert(title, message, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Confirmar", style: "destructive", onPress: doChange },
+    ]);
   };
 
   if (isLoading) {
@@ -191,11 +282,18 @@ export default function AppointmentDetailScreen() {
   const isDone = appt.status === "DONE";
   const isScheduledOrArrived = appt.status === "SCHEDULED" || appt.status === "ARRIVED";
   const isNoShow = appt.status === "NO_SHOW";
+  const selectedAreaSvgKeysFromClient = clientLaserSelections
+    .map((selection: any) => laserAreas.find((area: any) => area.id === selection.areaId)?.svgKey)
+    .filter(Boolean) as string[];
+  const selectedAreaSvgKeys = (appt.laserSession?.areasSnapshotJson?.length
+    ? appt.laserSession.areasSnapshotJson
+    : selectedAreaSvgKeysFromClient) as string[];
+  const laserPowerAreas = (laserAreas || []).map((area: any) => area.name);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/calendar"))} hitSlop={12}>
           <Ionicons name="close" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Detalle de cita</Text>
@@ -216,6 +314,21 @@ export default function AppointmentDetailScreen() {
         </View>
 
         <View style={styles.content}>
+          <SectionCard title="Accesos rápidos">
+            <View style={styles.quickGrid}>
+              <Pressable style={styles.quickBtn} onPress={() => setShowHistoryModal(true)}>
+                <Ionicons name="time-outline" size={20} color={Colors.primary} />
+                <Text style={styles.quickBtnText}>Historial rápido</Text>
+              </Pressable>
+              {appt.type === "LASER" && (user?.role === "OWNER" || user?.role === "ADMIN") && (
+                <Pressable style={styles.quickBtn} onPress={() => setShowLaserPowerModal(true)}>
+                  <Ionicons name="flash-outline" size={20} color={Colors.secondary} />
+                  <Text style={styles.quickBtnText}>Potencia por área</Text>
+                </Pressable>
+              )}
+            </View>
+          </SectionCard>
+
           {/* STATUS ACTIONS */}
           {isScheduledOrArrived && (
             <SectionCard title="Acciones">
@@ -223,7 +336,7 @@ export default function AppointmentDetailScreen() {
                 {appt.status === "SCHEDULED" && (
                   <Pressable
                     style={({ pressed }) => [styles.actionBtn, { backgroundColor: Colors.success + "18" }, pressed && { opacity: 0.7 }]}
-                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); updateStatusMutation.mutate("ARRIVED"); }}
+                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); handleStatusChange("ARRIVED"); }}
                   >
                     <Ionicons name="checkmark-circle" size={22} color={Colors.success} />
                     <Text style={[styles.actionBtnText, { color: Colors.success }]}>Llegó</Text>
@@ -231,24 +344,14 @@ export default function AppointmentDetailScreen() {
                 )}
                 <Pressable
                   style={({ pressed }) => [styles.actionBtn, { backgroundColor: Colors.error + "18" }, pressed && { opacity: 0.7 }]}
-                  onPress={() => {
-                    Alert.alert("No llegó", "¿La clienta no llegó?", [
-                      { text: "Cancelar", style: "cancel" },
-                      { text: "Confirmar", style: "destructive", onPress: () => updateStatusMutation.mutate("NO_SHOW") },
-                    ]);
-                  }}
+                  onPress={() => handleStatusChange("NO_SHOW")}
                 >
                   <Ionicons name="close-circle" size={22} color={Colors.error} />
                   <Text style={[styles.actionBtnText, { color: Colors.error }]}>No llegó</Text>
                 </Pressable>
                 <Pressable
                   style={({ pressed }) => [styles.actionBtn, { backgroundColor: Colors.textMuted + "18" }, pressed && { opacity: 0.7 }]}
-                  onPress={() => {
-                    Alert.alert("Cancelar cita", "¿Confirmas cancelar esta cita?", [
-                      { text: "No", style: "cancel" },
-                      { text: "Cancelar cita", style: "destructive", onPress: () => updateStatusMutation.mutate("CANCELLED") },
-                    ]);
-                  }}
+                  onPress={() => handleStatusChange("CANCELLED")}
                 >
                   <Ionicons name="ban" size={22} color={Colors.textMuted} />
                   <Text style={[styles.actionBtnText, { color: Colors.textMuted }]}>Cancelar</Text>
@@ -370,6 +473,17 @@ export default function AppointmentDetailScreen() {
                   </Pressable>
                 );
               })}
+            </SectionCard>
+          )}
+
+          {appt.type === "LASER" && (
+            <SectionCard title="Áreas láser">
+              <LaserBodyMap
+                areas={laserAreas}
+                selectedSvgKeys={selectedAreaSvgKeys}
+                readOnly
+                title={isDone ? "Snapshot de áreas depiladas" : "Referencia rápida para depilación"}
+              />
             </SectionCard>
           )}
 
@@ -518,6 +632,83 @@ export default function AppointmentDetailScreen() {
 
         <View style={{ height: 80 }} />
       </ScrollView>
+
+      <Modal visible={showHistoryModal} transparent animationType="slide" onRequestClose={() => setShowHistoryModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Historial rápido</Text>
+              <Pressable onPress={() => setShowHistoryModal(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={Colors.text} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {(historyAppts || []).slice(0, 8).map((h) => {
+                const isLaserView = user?.role === "OWNER" || user?.role === "ADMIN";
+                return (
+                  <View key={h.id} style={styles.historyItem}>
+                    <Text style={styles.historyDate}>{new Date(h.dateTimeStart).toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" })} · {formatTime(h.dateTimeStart)}</Text>
+                    <Text style={styles.historyStatus}>{STATUS_LABELS[h.status] || h.status}</Text>
+                    {isLaserView && h.type === "LASER" ? (
+                      <>
+                        {!!h.laserSession?.powerByArea && (
+                          <Text style={styles.historyMeta} numberOfLines={2}>
+                            {Object.entries(h.laserSession.powerByArea).map(([area, val]) => `${area}: ${val}`).join(" · ")}
+                          </Text>
+                        )}
+                        {!!h.payment && <Text style={styles.historyMeta}>Pago: ${h.payment.totalAmount}</Text>}
+                      </>
+                    ) : (
+                      <Text style={styles.historyMeta}>{h.notes || "Sin notas"}</Text>
+                    )}
+                  </View>
+                );
+              })}
+              {!historyAppts?.length && <Text style={styles.emptyText}>Sin historial disponible</Text>}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showLaserPowerModal} transparent animationType="slide" onRequestClose={() => setShowLaserPowerModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Potencia por área</Text>
+              <Pressable onPress={() => setShowLaserPowerModal(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={Colors.text} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {laserPowerAreas.map((area) => (
+                <View key={area} style={styles.powerRow}>
+                  <Text style={styles.powerLabel}>{area}</Text>
+                  <TextInput
+                    value={powerByArea[area] || ""}
+                    onChangeText={(value) => setPowerByArea((prev) => ({ ...prev, [area]: value }))}
+                    style={styles.powerInput}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={Colors.textMuted}
+                  />
+                </View>
+              ))}
+              <View style={styles.editBtns}>
+                <Pressable style={styles.cancelEditBtn} onPress={() => setShowLaserPowerModal(false)}>
+                  <Text style={styles.cancelEditBtnText}>Cancelar</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.saveEditBtn, saveLaserPowerMutation.isPending && { opacity: 0.5 }]}
+                  onPress={() => saveLaserPowerMutation.mutate()}
+                  disabled={saveLaserPowerMutation.isPending}
+                >
+                  {saveLaserPowerMutation.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveEditBtnText}>Guardar</Text>}
+                </Pressable>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -543,6 +734,19 @@ const styles = StyleSheet.create({
   infoValue: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.text },
   packageBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.secondary + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginTop: 4 },
   packageBadgeText: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.secondary },
+  quickGrid: { flexDirection: "row", gap: 10 },
+  quickBtn: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  quickBtnText: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.text },
   actionRow: { flexDirection: "row", gap: 8 },
   actionBtn: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 12, borderRadius: 12 },
   actionBtnText: { fontFamily: "Nunito_700Bold", fontSize: 12 },
@@ -596,4 +800,45 @@ const styles = StyleSheet.create({
   clientBtn: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surface, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: Colors.border },
   clientBtnText: { flex: 1, fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.primary },
   emptyText: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textMuted, fontStyle: "italic" },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 22,
+    maxHeight: "82%",
+  },
+  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  modalTitle: { fontFamily: "Nunito_800ExtraBold", fontSize: 18, color: Colors.text },
+  historyItem: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    backgroundColor: Colors.background,
+  },
+  historyDate: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.text },
+  historyStatus: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.primary, marginTop: 2 },
+  historyMeta: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
+  powerRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
+  powerLabel: { flex: 1, fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.text },
+  powerInput: {
+    width: 96,
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontFamily: "Nunito_700Bold",
+    color: Colors.text,
+    textAlign: "right",
+  },
 });
