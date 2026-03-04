@@ -17,13 +17,11 @@ function setupCors(app: express.Application) {
   app.use((req, res, next) => {
     const origins = new Set<string>();
 
-    if (process.env.REPLIT_DEV_DOMAIN) {
-      origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
-    }
-
-    if (process.env.REPLIT_DOMAINS) {
-      process.env.REPLIT_DOMAINS.split(",").forEach((d) => {
-        origins.add(`https://${d.trim()}`);
+    if (process.env.ALLOWED_ORIGINS) {
+      process.env.ALLOWED_ORIGINS.split(",").forEach((originValue) => {
+        const origin = originValue.trim();
+        if (!origin) return;
+        origins.add(origin);
       });
     }
 
@@ -32,7 +30,9 @@ function setupCors(app: express.Application) {
     // Allow localhost origins for Expo web development (any port)
     const isLocalhost =
       origin?.startsWith("http://localhost:") ||
-      origin?.startsWith("http://127.0.0.1:");
+      origin?.startsWith("http://127.0.0.1:") ||
+      origin?.startsWith("https://localhost:") ||
+      origin?.startsWith("https://127.0.0.1:");
 
     if (origin && (origins.has(origin) || isLocalhost)) {
       res.header("Access-Control-Allow-Origin", origin);

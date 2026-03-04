@@ -17,10 +17,13 @@ export function getApiUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
   if (domain) return toBaseUrl(domain);
 
-  const browserHost = (globalThis as { location?: { hostname?: string } }).location?.hostname;
-  if (browserHost) return `http://${browserHost}:5050/`;
+  const browserLocation = (globalThis as { location?: { protocol?: string; host?: string } }).location;
+  if (browserLocation?.host) {
+    const protocol = browserLocation.protocol || "http:";
+    return `${protocol}//${browserLocation.host}/`;
+  }
 
-  return "http://localhost:5050/";
+  return "http://localhost:5000/";
 }
 
 let _authToken: string | null = null;

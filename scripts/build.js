@@ -32,30 +32,59 @@ function stripProtocol(domain) {
   let urlString = domain.trim();
 
   if (!/^https?:\/\//i.test(urlString)) {
-    urlString = `https://${urlString}`;
+    const isLocal =
+      urlString.startsWith("localhost") ||
+      urlString.startsWith("127.0.0.1") ||
+      urlString.startsWith("0.0.0.0");
+    urlString = `${isLocal ? "http" : "https"}://${urlString}`;
   }
 
   return new URL(urlString).host;
 }
 
-function getDeploymentDomain() {
-  // Check Replit deployment environment variables first
-  if (process.env.REPLIT_INTERNAL_APP_DOMAIN) {
-    return stripProtocol(process.env.REPLIT_INTERNAL_APP_DOMAIN);
+function normalizeBaseUrl(value) {
+  const input = value.trim();
+  if (!input) return "";
+
+  if (/^https?:\/\//i.test(input)) {
+    return new URL(input).origin;
   }
 
-  if (process.env.REPLIT_DEV_DOMAIN) {
-    return stripProtocol(process.env.REPLIT_DEV_DOMAIN);
+  const isLocal =
+    input.startsWith("localhost") ||
+    input.startsWith("127.0.0.1") ||
+    input.startsWith("0.0.0.0");
+
+  return new URL(`${isLocal ? "http" : "https"}://${input}`).origin;
+}
+
+function stripTrailingSlash(url) {
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+function getDeploymentConfig() {
+  const fromEnv =
+    process.env.APP_BASE_URL ||
+    process.env.EXPO_PUBLIC_API_URL ||
+    process.env.EXPO_PUBLIC_DOMAIN ||
+    process.env.DEPLOYMENT_DOMAIN;
+
+  if (fromEnv) {
+    const baseUrl = stripTrailingSlash(normalizeBaseUrl(fromEnv));
+    return {
+      baseUrl,
+      expoPublicDomain: baseUrl,
+    };
   }
 
-  if (process.env.EXPO_PUBLIC_DOMAIN) {
-    return stripProtocol(process.env.EXPO_PUBLIC_DOMAIN);
-  }
-
-  console.error(
-    "ERROR: No deployment domain found. Set REPLIT_INTERNAL_APP_DOMAIN, REPLIT_DEV_DOMAIN, or EXPO_PUBLIC_DOMAIN",
+  const fallbackBaseUrl = "http://localhost:5000";
+  console.log(
+    `No APP_BASE_URL/EXPO_PUBLIC_API_URL configured. Using fallback ${fallbackBaseUrl}`,
   );
-  process.exit(1);
+  return {
+    baseUrl: fallbackBaseUrl,
+    expoPublicDomain: fallbackBaseUrl,
+  };
 }
 
 function prepareDirectories(timestamp) {
@@ -455,6 +484,8 @@ function updateBundleUrls(timestamp, baseUrl) {
 }
 
 function updateManifests(manifests, timestamp, baseUrl, assetsByHash) {
+  const hostWithoutProtocol = baseUrl.replace(/^https?:\/\//, "");
+
   const updateForPlatform = (platform, manifest) => {
     if (!manifest.launchAsset || !manifest.extra) {
       exitWithError(`Malformed manifest for ${platform}`);
@@ -465,10 +496,8 @@ function updateManifests(manifests, timestamp, baseUrl, assetsByHash) {
     manifest.createdAt = new Date(
       Number(timestamp.split("-")[0]),
     ).toISOString();
-    manifest.extra.expoClient.hostUri =
-      baseUrl.replace("https://", "") + "/" + platform;
-    manifest.extra.expoGo.debuggerHost =
-      baseUrl.replace("https://", "") + "/" + platform;
+    manifest.extra.expoClient.hostUri = hostWithoutProtocol + "/" + platform;
+    manifest.extra.expoGo.debuggerHost = hostWithoutProtocol + "/" + platform;
     manifest.extra.expoGo.packagerOpts.dev = false;
 
     if (manifest.assets && manifest.assets.length > 0) {
@@ -501,14 +530,13 @@ async function main() {
 
   setupSignalHandlers();
 
-  const domain = getDeploymentDomain();
-  const baseUrl = `https://${domain}`;
+  const { baseUrl, expoPublicDomain } = getDeploymentConfig();
   const timestamp = `${Date.now()}-${process.pid}`;
 
   prepareDirectories(timestamp);
   clearMetroCache();
 
-  await startMetro(domain);
+  await startMetro(expoPublicDomain);
 
   const downloadTimeout = 300000;
   const downloadPromise = downloadBundlesAndManifests(timestamp);
