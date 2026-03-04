@@ -18,7 +18,10 @@ services:
       retries: 20
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5000}
     container_name: mevak-app
     restart: unless-stopped
     depends_on:

@@ -1,6 +1,9 @@
 FROM node:22-slim AS build
 WORKDIR /app
 
+ARG APP_BASE_URL=http://localhost:5000
+ENV APP_BASE_URL=${APP_BASE_URL}
+
 COPY package*.json ./
 RUN npm ci
 
