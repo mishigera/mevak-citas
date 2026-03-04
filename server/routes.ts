@@ -19,6 +19,12 @@ function getToken(req: Request): string | null {
   return auth.slice(7);
 }
 
+function paramId(req: Request): string {
+  const raw = (req.params as Record<string, string | string[] | undefined>).id;
+  if (Array.isArray(raw)) return raw[0] || "";
+  return raw || "";
+}
+
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = getToken(req);
   if (!token) return res.status(401).json({ message: "Unauthorized" });
@@ -97,7 +103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/users/:id", requireRole("ADMIN"), async (req, res) => {
-    const user = storage.users.get(req.params.id);
+    const user = storage.users.get(paramId(req));
     if (!user) return res.status(404).json({ message: "Not found" });
     const { name, email, role, isActive, password } = req.body;
     if (name) user.name = name;
@@ -122,7 +128,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/clients/:id", requireAuth, (req, res) => {
-    const client = storage.clients.get(req.params.id);
+    const client = storage.clients.get(paramId(req));
     if (!client) return res.status(404).json({ message: "Not found" });
     res.json(client);
   });
@@ -136,7 +142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/clients/:id", requireAuth, (req, res) => {
-    const client = storage.clients.get(req.params.id);
+    const client = storage.clients.get(paramId(req));
     if (!client) return res.status(404).json({ message: "Not found" });
     Object.assign(client, req.body);
     storage.clients.set(client.id, client);
@@ -146,21 +152,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // CLINICAL PROFILE
   app.get("/api/clients/:id/clinical", requireRole("ADMIN", "OWNER"), (req, res) => {
     const profiles = Array.from(storage.clinicalProfiles.values());
-    const profile = profiles.find((p) => p.clientId === req.params.id);
+    const profile = profiles.find((p) => p.clientId === paramId(req));
     res.json(profile || null);
   });
 
   app.put("/api/clients/:id/clinical", requireRole("ADMIN", "OWNER"), (req, res) => {
+    const clientId = paramId(req);
     const profiles = Array.from(storage.clinicalProfiles.values());
-    let profile = profiles.find((p) => p.clientId === req.params.id);
+    const profile = profiles.find((p) => p.clientId === clientId);
     if (profile) {
-      Object.assign(profile, req.body, { clientId: req.params.id });
+      Object.assign(profile, req.body, { clientId });
       storage.clinicalProfiles.set(profile.id, profile);
+      return res.json(profile);
     } else {
-      profile = { id: randomUUID(), clientId: req.params.id, ...req.body };
-      storage.clinicalProfiles.set(profile.id, profile);
+      const createdProfile = { id: randomUUID(), clientId, ...req.body };
+      storage.clinicalProfiles.set(createdProfile.id, createdProfile);
+      return res.json(createdProfile);
     }
-    res.json(profile);
   });
 
   // LASER AREAS
@@ -169,25 +177,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/clients/:id/laser-areas", requireAuth, (req, res) => {
-    res.json(Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === req.params.id));
+    res.json(Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === paramId(req)));
   });
 
   app.put("/api/clients/:id/laser-areas", requireRole("ADMIN", "OWNER"), (req, res) => {
+    const clientId = paramId(req);
     const { areaIds } = req.body as { areaIds: string[] };
-    Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === req.params.id).forEach((s) => storage.clientLaserSelections.delete(s.id));
-    const newSelections = areaIds.map((areaId) => { const sel = { id: randomUUID(), clientId: req.params.id, areaId }; storage.clientLaserSelections.set(sel.id, sel); return sel; });
+    Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === clientId).forEach((s) => storage.clientLaserSelections.delete(s.id));
+    const newSelections = areaIds.map((areaId) => { const sel = { id: randomUUID(), clientId, areaId }; storage.clientLaserSelections.set(sel.id, sel); return sel; });
     res.json(newSelections);
   });
 
   // CLIENT PACKAGES
   app.get("/api/clients/:id/packages", requireAuth, (req, res) => {
-    res.json(Array.from(storage.clientPackages.values()).filter((p) => p.clientId === req.params.id));
+    res.json(Array.from(storage.clientPackages.values()).filter((p) => p.clientId === paramId(req)));
   });
 
   app.post("/api/clients/:id/packages", requireRole("ADMIN", "OWNER"), (req, res) => {
+    const clientId = paramId(req);
     const pkg = storage.packages.get(req.body.packageId);
     if (!pkg) return res.status(404).json({ message: "Paquete no encontrado" });
-    const cp = { id: randomUUID(), clientId: req.params.id, packageId: pkg.id, totalSessions: pkg.totalSessions, usedSessions: 0, remainingSessions: pkg.totalSessions, startDate: new Date().toISOString(), status: "ACTIVE" as const };
+    const cp = { id: randomUUID(), clientId, packageId: pkg.id, totalSessions: pkg.totalSessions, usedSessions: 0, remainingSessions: pkg.totalSessions, startDate: new Date().toISOString(), status: "ACTIVE" as const };
     storage.clientPackages.set(cp.id, cp);
     res.status(201).json(cp);
   });
@@ -209,7 +219,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/services/:id", requireRole("ADMIN"), (req, res) => {
-    const svc = storage.services.get(req.params.id);
+    const svc = storage.services.get(paramId(req));
     if (!svc) return res.status(404).json({ message: "Not found" });
     Object.assign(svc, req.body);
     storage.services.set(svc.id, svc);
@@ -247,7 +257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/appointments/:id", requireAuth, (req, res) => {
-    const appt = storage.appointments.get(req.params.id);
+    const appt = storage.appointments.get(paramId(req));
     if (!appt) return res.status(404).json({ message: "Not found" });
     const client = storage.clients.get(appt.clientId);
     const staff = storage.users.get(appt.staffId);
@@ -282,7 +292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/appointments/:id", requireAuth, (req, res) => {
-    const appt = storage.appointments.get(req.params.id);
+    const appt = storage.appointments.get(paramId(req));
     if (!appt) return res.status(404).json({ message: "Not found" });
     const { dateTimeStart, dateTimeEnd, staffId, status, notes, clientId, type } = req.body;
     if ((dateTimeStart || dateTimeEnd) && (staffId || appt.staffId)) {
@@ -308,26 +318,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // APPOINTMENT SERVICES
   app.put("/api/appointments/:id/services", requireAuth, (req, res) => {
+    const appointmentId = paramId(req);
     const { serviceIds } = req.body as { serviceIds: string[] };
-    Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === req.params.id).forEach((s) => storage.appointmentServices.delete(s.id));
-    const newSvcs = serviceIds.map((serviceId) => { const svc = { id: randomUUID(), appointmentId: req.params.id, serviceId }; storage.appointmentServices.set(svc.id, svc); return svc; });
+    Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === appointmentId).forEach((s) => storage.appointmentServices.delete(s.id));
+    const newSvcs = serviceIds.map((serviceId) => { const svc = { id: randomUUID(), appointmentId, serviceId }; storage.appointmentServices.set(svc.id, svc); return svc; });
     res.json(newSvcs);
   });
 
   // LASER SESSIONS
   app.get("/api/appointments/:id/laser-session", requireAuth, (req, res) => {
-    const session = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === req.params.id);
+    const session = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === paramId(req));
     res.json(session || null);
   });
 
   app.put("/api/appointments/:id/laser-session", requireRole("ADMIN", "OWNER"), (req, res) => {
-    const existing = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === req.params.id);
+    const appointmentId = paramId(req);
+    const existing = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === appointmentId);
     if (existing) {
-      Object.assign(existing, req.body, { appointmentId: req.params.id });
+      Object.assign(existing, req.body, { appointmentId });
       storage.laserSessions.set(existing.id, existing);
       res.json(existing);
     } else {
-      const session = { id: randomUUID(), appointmentId: req.params.id, ...req.body };
+      const session = { id: randomUUID(), appointmentId, ...req.body };
       storage.laserSessions.set(session.id, session);
       res.json(session);
     }
@@ -335,18 +347,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // PAYMENTS
   app.get("/api/appointments/:id/payment", requireAuth, (req, res) => {
-    res.json(Array.from(storage.payments.values()).find((p) => p.appointmentId === req.params.id) || null);
+    res.json(Array.from(storage.payments.values()).find((p) => p.appointmentId === paramId(req)) || null);
   });
 
   app.post("/api/appointments/:id/payment", requireAuth, (req, res) => {
+    const appointmentId = paramId(req);
     const { method, totalAmount } = req.body;
-    const appt = storage.appointments.get(req.params.id);
+    const appt = storage.appointments.get(appointmentId);
     if (!appt) return res.status(404).json({ message: "Cita no encontrada" });
-    const existing = Array.from(storage.payments.values()).find((p) => p.appointmentId === req.params.id);
+    const existing = Array.from(storage.payments.values()).find((p) => p.appointmentId === appointmentId);
     if (existing) return res.status(409).json({ message: "Ya existe un pago" });
     const total = Number(totalAmount) || 0;
     const isFacial = appt.type === "FACIAL";
-    const payment = { id: randomUUID(), appointmentId: req.params.id, method: method as PaymentMethod, totalAmount: total, ownerNetAmount: isFacial ? Math.floor(total / 2) : total, facialistNetAmount: isFacial ? Math.ceil(total / 2) : 0, facialistPaidFlag: false, createdAt: new Date().toISOString() };
+    const payment = { id: randomUUID(), appointmentId, method: method as PaymentMethod, totalAmount: total, ownerNetAmount: isFacial ? Math.floor(total / 2) : total, facialistNetAmount: isFacial ? Math.ceil(total / 2) : 0, facialistPaidFlag: false, createdAt: new Date().toISOString() };
     storage.payments.set(payment.id, payment);
     appt.status = "DONE";
     storage.appointments.set(appt.id, appt);
@@ -384,7 +397,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/payments/:id/facialist-paid", requireRole("ADMIN", "OWNER"), (req, res) => {
-    const payment = storage.payments.get(req.params.id);
+    const payment = storage.payments.get(paramId(req));
     if (!payment) return res.status(404).json({ message: "Not found" });
     payment.facialistPaidFlag = req.body.paid ?? true;
     storage.payments.set(payment.id, payment);
@@ -436,17 +449,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.delete("/api/blocks/:id", requireRole("ADMIN", "OWNER", "FACIALIST"), (req, res) => {
-    const block = storage.availabilityBlocks.get(req.params.id);
+    const blockId = paramId(req);
+    const block = storage.availabilityBlocks.get(blockId);
     if (!block) return res.status(404).json({ message: "Not found" });
     if (block.userId !== req.userId && req.userRole !== "ADMIN") return res.status(403).json({ message: "No puedes eliminar bloqueos de otro usuario" });
-    storage.availabilityBlocks.delete(req.params.id);
+    storage.availabilityBlocks.delete(blockId);
     res.json({ ok: true });
   });
 
   // CLIENT APPOINTMENT HISTORY
   app.get("/api/clients/:id/appointments", requireAuth, (req, res) => {
     const appts = Array.from(storage.appointments.values())
-      .filter((a) => a.clientId === req.params.id)
+      .filter((a) => a.clientId === paramId(req))
       .sort((a, b) => b.dateTimeStart.localeCompare(a.dateTimeStart))
       .map((a) => {
         const staff = storage.users.get(a.staffId);

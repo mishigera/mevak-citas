@@ -222,7 +222,7 @@ class DbStorage {
 
   private persistQueue = new Set<string>();
   private tokensPersistQueued = false;
-  private flushTimer: NodeJS.Timeout | null = null;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   ready: Promise<void>;
 
