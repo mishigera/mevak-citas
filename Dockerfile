@@ -13,7 +13,7 @@ ENV NODE_ENV=production
 ENV PORT=5000
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 COPY --from=build /app/server_dist ./server_dist
 COPY --from=build /app/static-build ./static-build
