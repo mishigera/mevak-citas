@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.replit
+attached_assets
+server_dist
+static-build
+.expo
+.vscode

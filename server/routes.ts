@@ -43,6 +43,8 @@ function requireRole(...roles: Role[]) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  await storage.ready;
+
   // AUTH
   app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;

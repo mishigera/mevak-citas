@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
+import { ensureDbReady, loadEntity, saveEntity } from "./db";
 
 export type Role = "ADMIN" | "OWNER" | "RECEPTION" | "FACIALIST";
 export type AppointmentType = "FACIAL" | "LASER";
@@ -136,112 +137,238 @@ export interface AuthToken {
   role: Role;
 }
 
-class MemStorage {
-  users: Map<string, User> = new Map();
-  clients: Map<string, Client> = new Map();
-  clinicalProfiles: Map<string, ClinicalProfile> = new Map();
-  services: Map<string, Service> = new Map();
-  packages: Map<string, Package> = new Map();
-  laserAreas: Map<string, LaserArea> = new Map();
-  clientLaserSelections: Map<string, ClientLaserSelection> = new Map();
-  clientPackages: Map<string, ClientPackage> = new Map();
-  appointments: Map<string, Appointment> = new Map();
-  appointmentServices: Map<string, AppointmentService> = new Map();
-  laserSessions: Map<string, LaserSession> = new Map();
-  payments: Map<string, Payment> = new Map();
-  availabilityBlocks: Map<string, AvailabilityBlock> = new Map();
-  tokens: Map<string, AuthToken> = new Map();
-
-  constructor() {
-    this.seed();
+class PersistentMap<T extends { id: string }> extends Map<string, T> {
+  constructor(
+    private readonly entity: string,
+    private readonly onChange: (entity: string) => void,
+  ) {
+    super();
   }
 
-  private async seed() {
-    const adminHash = await bcrypt.hash("admin123", 10);
-    const ownerHash = await bcrypt.hash("owner123", 10);
-    const recepHash = await bcrypt.hash("recep123", 10);
-    const facHash = await bcrypt.hash("fac123", 10);
+  set(key: string, value: T): this {
+    const out = super.set(key, value);
+    this.onChange(this.entity);
+    return out;
+  }
 
-    const admin: User = { id: randomUUID(), name: "Admin", email: "admin@beauty.com", passwordHash: adminHash, role: "ADMIN", isActive: true, createdAt: new Date().toISOString() };
-    const owner: User = { id: randomUUID(), name: "Laura (Laserista)", email: "owner@beauty.com", passwordHash: ownerHash, role: "OWNER", isActive: true, createdAt: new Date().toISOString() };
-    const recep: User = { id: randomUUID(), name: "Sofia (Recepción)", email: "recep@beauty.com", passwordHash: recepHash, role: "RECEPTION", isActive: true, createdAt: new Date().toISOString() };
-    const fac: User = { id: randomUUID(), name: "Valeria (Facialista)", email: "fac@beauty.com", passwordHash: facHash, role: "FACIALIST", isActive: true, createdAt: new Date().toISOString() };
+  delete(key: string): boolean {
+    const out = super.delete(key);
+    if (out) this.onChange(this.entity);
+    return out;
+  }
 
-    [admin, owner, recep, fac].forEach(u => this.users.set(u.id, u));
+  clear(): void {
+    super.clear();
+    this.onChange(this.entity);
+  }
 
-    const services: Service[] = [
-      { id: randomUUID(), name: "Limpieza Facial Profunda", type: "FACIAL", price: 600, isActive: true },
-      { id: randomUUID(), name: "Tratamiento Hidratante", type: "FACIAL", price: 500, isActive: true },
-      { id: randomUUID(), name: "Peeling Químico", type: "FACIAL", price: 800, isActive: true },
-      { id: randomUUID(), name: "Microdermoabrasión", type: "FACIAL", price: 750, isActive: true },
-      { id: randomUUID(), name: "Radiofrecuencia Facial", type: "FACIAL", price: 900, isActive: true },
-      { id: randomUUID(), name: "Sesión Láser Suelta", type: "LASER", price: 400, isActive: true },
-    ];
-    services.forEach(s => this.services.set(s.id, s));
+  replaceAll(items: T[]) {
+    super.clear();
+    items.forEach((item) => super.set(item.id, item));
+  }
 
-    const pkg: Package = { id: randomUUID(), name: "Paquete Láser 10 Sesiones", type: "LASER", totalSessions: 10, price: 3500, isActive: true };
-    this.packages.set(pkg.id, pkg);
-
-    const laserAreas: LaserArea[] = [
-      { id: randomUUID(), name: "Cuello", bodySide: "front", bodyRegion: "torso", svgKey: "cuello", isActive: true },
-      { id: randomUUID(), name: "Nuca", bodySide: "back", bodyRegion: "torso", svgKey: "nuca", isActive: true },
-      { id: randomUUID(), name: "Axila", bodySide: "both", bodyRegion: "torso", svgKey: "axila", isActive: true },
-      { id: randomUUID(), name: "Brazos", bodySide: "both", bodyRegion: "arms", svgKey: "brazos", isActive: true },
-      { id: randomUUID(), name: "Abdomen", bodySide: "front", bodyRegion: "torso", svgKey: "abdomen", isActive: true },
-      { id: randomUUID(), name: "Línea de abdomen", bodySide: "front", bodyRegion: "torso", svgKey: "linea_abdomen", isActive: true },
-      { id: randomUUID(), name: "Manos", bodySide: "both", bodyRegion: "arms", svgKey: "manos", isActive: true },
-      { id: randomUUID(), name: "Muslo", bodySide: "both", bodyRegion: "legs", svgKey: "muslo", isActive: true },
-      { id: randomUUID(), name: "Área del bikini", bodySide: "front", bodyRegion: "pelvis", svgKey: "area_bikini", isActive: true },
-      { id: randomUUID(), name: "Media pierna", bodySide: "both", bodyRegion: "legs", svgKey: "media_pierna", isActive: true },
-      { id: randomUUID(), name: "Pies", bodySide: "both", bodyRegion: "legs", svgKey: "pies", isActive: true },
-      { id: randomUUID(), name: "Espalda", bodySide: "back", bodyRegion: "torso", svgKey: "espalda", isActive: true },
-      { id: randomUUID(), name: "Espalda baja", bodySide: "back", bodyRegion: "torso", svgKey: "espalda_baja", isActive: true },
-      { id: randomUUID(), name: "Línea interglútea", bodySide: "back", bodyRegion: "pelvis", svgKey: "linea_interglutea", isActive: true },
-      { id: randomUUID(), name: "Glúteos", bodySide: "back", bodyRegion: "pelvis", svgKey: "gluteos", isActive: true },
-      { id: randomUUID(), name: "Frente", bodySide: "front", bodyRegion: "face", svgKey: "frente", isActive: true },
-      { id: randomUUID(), name: "Entrecejo", bodySide: "front", bodyRegion: "face", svgKey: "entrecejo", isActive: true },
-      { id: randomUUID(), name: "Mejillas", bodySide: "front", bodyRegion: "face", svgKey: "mejillas", isActive: true },
-      { id: randomUUID(), name: "Media cara", bodySide: "front", bodyRegion: "face", svgKey: "media_cara", isActive: true },
-      { id: randomUUID(), name: "Mentón", bodySide: "front", bodyRegion: "face", svgKey: "menton", isActive: true },
-      { id: randomUUID(), name: "Oídos", bodySide: "front", bodyRegion: "face", svgKey: "oidos", isActive: true },
-      { id: randomUUID(), name: "Patillas", bodySide: "front", bodyRegion: "face", svgKey: "patillas", isActive: true },
-      { id: randomUUID(), name: "Bigote", bodySide: "front", bodyRegion: "face", svgKey: "bigote", isActive: true },
-    ];
-    laserAreas.forEach(a => this.laserAreas.set(a.id, a));
-
-    const clients: Client[] = [
-      { id: randomUUID(), fullName: "María García", phone: "555-1234", email: "maria@example.com", birthDate: "1990-05-15", sex: "F", occupation: "Maestra", createdAt: new Date().toISOString() },
-      { id: randomUUID(), fullName: "Ana López", phone: "555-5678", email: "ana@example.com", birthDate: "1985-08-22", sex: "F", createdAt: new Date().toISOString() },
-      { id: randomUUID(), fullName: "Carolina Martínez", phone: "555-9012", birthDate: "1995-03-10", sex: "F", occupation: "Médico", createdAt: new Date().toISOString() },
-    ];
-    clients.forEach(c => this.clients.set(c.id, c));
-
-    const today = new Date();
-    const todayStr = today.toISOString().split("T")[0];
-
-    const appt1: Appointment = { id: randomUUID(), dateTimeStart: `${todayStr}T09:00:00.000Z`, dateTimeEnd: `${todayStr}T10:00:00.000Z`, clientId: clients[0].id, staffId: fac.id, type: "FACIAL", status: "SCHEDULED", notes: "Acné en frente" };
-    const appt2: Appointment = { id: randomUUID(), dateTimeStart: `${todayStr}T11:00:00.000Z`, dateTimeEnd: `${todayStr}T12:00:00.000Z`, clientId: clients[1].id, staffId: owner.id, type: "LASER", status: "SCHEDULED" };
-    const appt3: Appointment = { id: randomUUID(), dateTimeStart: `${todayStr}T13:00:00.000Z`, dateTimeEnd: `${todayStr}T14:00:00.000Z`, clientId: clients[2].id, staffId: fac.id, type: "FACIAL", status: "ARRIVED" };
-    [appt1, appt2, appt3].forEach(a => this.appointments.set(a.id, a));
-
-    const appSvc1: AppointmentService = { id: randomUUID(), appointmentId: appt1.id, serviceId: services[0].id };
-    this.appointmentServices.set(appSvc1.id, appSvc1);
-
-    const cp: ClientPackage = { id: randomUUID(), clientId: clients[1].id, packageId: pkg.id, totalSessions: 10, usedSessions: 3, remainingSessions: 7, startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), status: "ACTIVE" };
-    this.clientPackages.set(cp.id, cp);
-
-    const ls: LaserSession = {
-      id: randomUUID(),
-      appointmentId: appt2.id,
-      clientPackageId: cp.id,
-      sessionNumber: 4,
-      areasSnapshotJson: ["axila", "media_pierna", "bigote"],
-    };
-    this.laserSessions.set(ls.id, ls);
-
-    const clinical: ClinicalProfile = { id: randomUUID(), clientId: clients[1].id, allergiesFlag: false, conditionsJson: { diabetes: false, hipertension: true, renales: false, cardiacas: false, circulatorias: false, digestivas: false, pulmonares: false, endocrinas: false, neurologicas: false, hematologicas: false, dermatologicas: false, otrosText: "" }, phototype: 2, eyeColor: "café", hairColor: "negro" };
-    this.clinicalProfiles.set(clinical.id, clinical);
+  snapshotValues(): T[] {
+    return Array.from(this.values());
   }
 }
 
-export const storage = new MemStorage();
+class TokenMap extends Map<string, AuthToken> {
+  constructor(private readonly onChange: () => void) {
+    super();
+  }
+
+  set(key: string, value: AuthToken): this {
+    const out = super.set(key, value);
+    this.onChange();
+    return out;
+  }
+
+  delete(key: string): boolean {
+    const out = super.delete(key);
+    if (out) this.onChange();
+    return out;
+  }
+
+  clear(): void {
+    super.clear();
+    this.onChange();
+  }
+
+  replaceAll(tokens: Record<string, AuthToken>) {
+    super.clear();
+    Object.entries(tokens).forEach(([key, value]) => super.set(key, value));
+  }
+
+  snapshot(): Record<string, AuthToken> {
+    return Object.fromEntries(this.entries());
+  }
+}
+
+class DbStorage {
+  users = new PersistentMap<User>("users", this.schedulePersist.bind(this));
+  clients = new PersistentMap<Client>("clients", this.schedulePersist.bind(this));
+  clinicalProfiles = new PersistentMap<ClinicalProfile>("clinicalProfiles", this.schedulePersist.bind(this));
+  services = new PersistentMap<Service>("services", this.schedulePersist.bind(this));
+  packages = new PersistentMap<Package>("packages", this.schedulePersist.bind(this));
+  laserAreas = new PersistentMap<LaserArea>("laserAreas", this.schedulePersist.bind(this));
+  clientLaserSelections = new PersistentMap<ClientLaserSelection>("clientLaserSelections", this.schedulePersist.bind(this));
+  clientPackages = new PersistentMap<ClientPackage>("clientPackages", this.schedulePersist.bind(this));
+  appointments = new PersistentMap<Appointment>("appointments", this.schedulePersist.bind(this));
+  appointmentServices = new PersistentMap<AppointmentService>("appointmentServices", this.schedulePersist.bind(this));
+  laserSessions = new PersistentMap<LaserSession>("laserSessions", this.schedulePersist.bind(this));
+  payments = new PersistentMap<Payment>("payments", this.schedulePersist.bind(this));
+  availabilityBlocks = new PersistentMap<AvailabilityBlock>("availabilityBlocks", this.schedulePersist.bind(this));
+  tokens = new TokenMap(this.scheduleTokensPersist.bind(this));
+
+  private persistQueue = new Set<string>();
+  private tokensPersistQueued = false;
+  private flushTimer: NodeJS.Timeout | null = null;
+
+  ready: Promise<void>;
+
+  constructor() {
+    this.ready = this.init();
+  }
+
+  private async init() {
+    await ensureDbReady();
+
+    await Promise.all([
+      this.loadCollection("users", this.users),
+      this.loadCollection("clients", this.clients),
+      this.loadCollection("clinicalProfiles", this.clinicalProfiles),
+      this.loadCollection("services", this.services),
+      this.loadCollection("packages", this.packages),
+      this.loadCollection("laserAreas", this.laserAreas),
+      this.loadCollection("clientLaserSelections", this.clientLaserSelections),
+      this.loadCollection("clientPackages", this.clientPackages),
+      this.loadCollection("appointments", this.appointments),
+      this.loadCollection("appointmentServices", this.appointmentServices),
+      this.loadCollection("laserSessions", this.laserSessions),
+      this.loadCollection("payments", this.payments),
+      this.loadCollection("availabilityBlocks", this.availabilityBlocks),
+      this.loadTokens(),
+    ]);
+
+    await this.seedIfNeeded();
+  }
+
+  private async loadCollection<T extends { id: string }>(entity: string, map: PersistentMap<T>) {
+    const items = await loadEntity<T>(entity);
+    map.replaceAll(items);
+  }
+
+  private async loadTokens() {
+    const rows = await loadEntity<{ key: string; value: AuthToken }>("tokens");
+    const tokenRecord: Record<string, AuthToken> = {};
+    rows.forEach((row) => {
+      if (row?.key && row?.value) tokenRecord[row.key] = row.value;
+    });
+    this.tokens.replaceAll(tokenRecord);
+  }
+
+  private async seedIfNeeded() {
+    if (!this.users.size) {
+      const defaultAdminEmail = process.env.ADMIN_EMAIL || "admin@mevakbeautycenter.com";
+      const defaultAdminPassword = process.env.ADMIN_PASSWORD || "admin123";
+      const adminHash = await bcrypt.hash(defaultAdminPassword, 10);
+      const admin: User = {
+        id: randomUUID(),
+        name: "Admin",
+        email: defaultAdminEmail,
+        passwordHash: adminHash,
+        role: "ADMIN",
+        isActive: true,
+        createdAt: new Date().toISOString(),
+      };
+      this.users.set(admin.id, admin);
+    }
+
+    if (!this.laserAreas.size) {
+      const laserAreas: LaserArea[] = [
+        { id: randomUUID(), name: "Cuello", bodySide: "front", bodyRegion: "torso", svgKey: "cuello", isActive: true },
+        { id: randomUUID(), name: "Nuca", bodySide: "back", bodyRegion: "torso", svgKey: "nuca", isActive: true },
+        { id: randomUUID(), name: "Axila", bodySide: "both", bodyRegion: "torso", svgKey: "axila", isActive: true },
+        { id: randomUUID(), name: "Brazos", bodySide: "both", bodyRegion: "arms", svgKey: "brazos", isActive: true },
+        { id: randomUUID(), name: "Abdomen", bodySide: "front", bodyRegion: "torso", svgKey: "abdomen", isActive: true },
+        { id: randomUUID(), name: "Línea de abdomen", bodySide: "front", bodyRegion: "torso", svgKey: "linea_abdomen", isActive: true },
+        { id: randomUUID(), name: "Manos", bodySide: "both", bodyRegion: "arms", svgKey: "manos", isActive: true },
+        { id: randomUUID(), name: "Muslo", bodySide: "both", bodyRegion: "legs", svgKey: "muslo", isActive: true },
+        { id: randomUUID(), name: "Área del bikini", bodySide: "front", bodyRegion: "pelvis", svgKey: "area_bikini", isActive: true },
+        { id: randomUUID(), name: "Media pierna", bodySide: "both", bodyRegion: "legs", svgKey: "media_pierna", isActive: true },
+        { id: randomUUID(), name: "Pies", bodySide: "both", bodyRegion: "legs", svgKey: "pies", isActive: true },
+        { id: randomUUID(), name: "Espalda", bodySide: "back", bodyRegion: "torso", svgKey: "espalda", isActive: true },
+        { id: randomUUID(), name: "Espalda baja", bodySide: "back", bodyRegion: "torso", svgKey: "espalda_baja", isActive: true },
+        { id: randomUUID(), name: "Línea interglútea", bodySide: "back", bodyRegion: "pelvis", svgKey: "linea_interglutea", isActive: true },
+        { id: randomUUID(), name: "Glúteos", bodySide: "back", bodyRegion: "pelvis", svgKey: "gluteos", isActive: true },
+        { id: randomUUID(), name: "Frente", bodySide: "front", bodyRegion: "face", svgKey: "frente", isActive: true },
+        { id: randomUUID(), name: "Entrecejo", bodySide: "front", bodyRegion: "face", svgKey: "entrecejo", isActive: true },
+        { id: randomUUID(), name: "Mejillas", bodySide: "front", bodyRegion: "face", svgKey: "mejillas", isActive: true },
+        { id: randomUUID(), name: "Media cara", bodySide: "front", bodyRegion: "face", svgKey: "media_cara", isActive: true },
+        { id: randomUUID(), name: "Mentón", bodySide: "front", bodyRegion: "face", svgKey: "menton", isActive: true },
+        { id: randomUUID(), name: "Oídos", bodySide: "front", bodyRegion: "face", svgKey: "oidos", isActive: true },
+        { id: randomUUID(), name: "Patillas", bodySide: "front", bodyRegion: "face", svgKey: "patillas", isActive: true },
+        { id: randomUUID(), name: "Bigote", bodySide: "front", bodyRegion: "face", svgKey: "bigote", isActive: true },
+      ];
+      laserAreas.forEach((area) => this.laserAreas.set(area.id, area));
+    }
+
+    await this.flushNow();
+  }
+
+  private schedulePersist(entity: string) {
+    this.persistQueue.add(entity);
+    this.scheduleFlush();
+  }
+
+  private scheduleTokensPersist() {
+    this.tokensPersistQueued = true;
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush() {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flushNow().catch((error) => {
+        console.error("Error persistiendo estado en DB", error);
+      });
+    }, 25);
+  }
+
+  private async flushNow() {
+    const entities = Array.from(this.persistQueue);
+    this.persistQueue.clear();
+
+    const tasks: Promise<unknown>[] = [];
+    entities.forEach((entity) => {
+      switch (entity) {
+        case "users": tasks.push(saveEntity("users", this.users.snapshotValues())); break;
+        case "clients": tasks.push(saveEntity("clients", this.clients.snapshotValues())); break;
+        case "clinicalProfiles": tasks.push(saveEntity("clinicalProfiles", this.clinicalProfiles.snapshotValues())); break;
+        case "services": tasks.push(saveEntity("services", this.services.snapshotValues())); break;
+        case "packages": tasks.push(saveEntity("packages", this.packages.snapshotValues())); break;
+        case "laserAreas": tasks.push(saveEntity("laserAreas", this.laserAreas.snapshotValues())); break;
+        case "clientLaserSelections": tasks.push(saveEntity("clientLaserSelections", this.clientLaserSelections.snapshotValues())); break;
+        case "clientPackages": tasks.push(saveEntity("clientPackages", this.clientPackages.snapshotValues())); break;
+        case "appointments": tasks.push(saveEntity("appointments", this.appointments.snapshotValues())); break;
+        case "appointmentServices": tasks.push(saveEntity("appointmentServices", this.appointmentServices.snapshotValues())); break;
+        case "laserSessions": tasks.push(saveEntity("laserSessions", this.laserSessions.snapshotValues())); break;
+        case "payments": tasks.push(saveEntity("payments", this.payments.snapshotValues())); break;
+        case "availabilityBlocks": tasks.push(saveEntity("availabilityBlocks", this.availabilityBlocks.snapshotValues())); break;
+        default:
+          break;
+      }
+    });
+
+    if (this.tokensPersistQueued) {
+      this.tokensPersistQueued = false;
+      const tokenRows = Object.entries(this.tokens.snapshot()).map(([key, value]) => ({ key, value }));
+      tasks.push(saveEntity("tokens", tokenRows.map((row) => ({ id: row.key, ...row }))));
+    }
+
+    if (tasks.length) await Promise.all(tasks);
+  }
+}
+
+export const storage = new DbStorage();

@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Beauty Center",
-    "slug": "beauty-center",
+    "name": "Mevak Beauty Center",
+    "slug": "mevak-beauty-center",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "beautycenter",
+    "scheme": "mevakbeautycenter",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -15,10 +15,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.beautycenter.app"
+      "bundleIdentifier": "com.mevak.beautycenter"
     },
     "android": {
-      "package": "com.beautycenter.app",
+      "package": "com.mevak.beautycenter",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -27,7 +27,11 @@
       }
     },
     "web": {
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Mevak Beauty Center",
+      "shortName": "Mevak",
+      "themeColor": "#FFFFFF",
+      "backgroundColor": "#FFFFFF"
     },
     "plugins": [
       [

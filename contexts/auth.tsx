@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, ReactNo
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiRequest, setAuthToken, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
+import { queryClient } from "@/lib/query-client";
 
 export type Role = "ADMIN" | "OWNER" | "RECEPTION" | "FACIALIST";
 
@@ -74,18 +75,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     const token = getAuthToken();
+    if (token) {
+      try {
+        const baseUrl = getApiUrl();
+        const url = new URL("/api/auth/logout", baseUrl);
+        await fetch(url.toString(), {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {}
+    }
+
     setAuthToken(null);
     setUser(null);
-    await AsyncStorage.removeItem("auth_token");
-    await AsyncStorage.removeItem("auth_user");
-
-    if (!token) return;
-
-    try {
-      setAuthToken(token);
-      await apiRequest("POST", "/api/auth/logout", {});
-    } catch {}
-    setAuthToken(null);
+    queryClient.clear();
+    await AsyncStorage.multiRemove(["auth_token", "auth_user"]);
   };
 
   const value = useMemo<AuthContextValue>(() => ({

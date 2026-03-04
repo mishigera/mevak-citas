@@ -57,9 +57,9 @@ export default function LoginScreen() {
         >
           <View style={styles.logoContainer}>
             <View style={styles.logoCircle}>
-              <Image source={require("../assets/icon/logomevak.png")} style={styles.logoImage} resizeMode="contain" />
+              <Image source={require("../assets/images/mevak-logo-small.png")} style={styles.logoImage} resizeMode="contain" />
             </View>
-            <Text style={styles.brandName}>Beauty Center</Text>
+            <Text style={styles.brandName}>Mevak Beauty Center</Text>
             <Text style={styles.brandSub}>Sistema de gestión</Text>
           </View>
 
@@ -111,22 +111,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.hints}>
-            <Text style={styles.hintTitle}>Cuentas demo:</Text>
-            {[
-              { label: "Admin", email: "admin@beauty.com", pass: "admin123" },
-              { label: "Owner (Laserista)", email: "owner@beauty.com", pass: "owner123" },
-              { label: "Recepcionista", email: "recep@beauty.com", pass: "recep123" },
-              { label: "Facialista", email: "fac@beauty.com", pass: "fac123" },
-            ].map((h) => (
-              <Pressable
-                key={h.email}
-                style={({ pressed }) => [styles.hintBtn, pressed && { opacity: 0.7 }]}
-                onPress={() => { setEmail(h.email); setPassword(h.pass); }}
-              >
-                <Text style={styles.hintLabel}>{h.label}</Text>
-                <Text style={styles.hintEmail}>{h.email}</Text>
-              </Pressable>
-            ))}
+            <Text style={styles.hintTitle}>Acceso restringido para personal autorizado.</Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -153,8 +138,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   logoImage: {
-    width: 56,
-    height: 56,
+    width: 62,
+    height: 62,
   },
   brandName: { fontFamily: "Nunito_800ExtraBold", fontSize: 28, color: Colors.text },
   brandSub: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary, marginTop: 4 },
@@ -202,17 +187,4 @@ const styles = StyleSheet.create({
   loginBtnText: { fontFamily: "Nunito_700Bold", fontSize: 16, color: "#fff" },
   hints: { marginTop: 24, gap: 8 },
   hintTitle: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary, marginBottom: 4 },
-  hintBtn: {
-    backgroundColor: "rgba(255,255,255,0.6)",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  hintLabel: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.text },
-  hintEmail: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
 });

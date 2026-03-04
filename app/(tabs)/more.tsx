@@ -78,7 +78,6 @@ export default function MoreScreen() {
           try {
             await logout();
           } finally {
-            router.dismissAll();
             router.replace("/login");
           }
         },
