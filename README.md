@@ -15,11 +15,20 @@ Primera versión productiva con backend en Docker + PostgreSQL.
 ## Variables importantes
 
 - `DATABASE_URL` (obligatoria)
+- `APP_BASE_URL` (opcional para build estático, ej. `https://app.tudominio.com`)
 - `ADMIN_EMAIL` (opcional, default `admin@mevakbeautycenter.com`)
 - `ADMIN_PASSWORD` (opcional, default `admin123`)
 - `PORT` (opcional, default `5000`)
 
 ## Ejecutar con Docker (recomendado)
+
+1. Crea tu archivo de variables:
+
+```bash
+cp .env.example .env
+```
+
+2. Levanta servicios:
 
 ```bash
 docker compose up --build -d
