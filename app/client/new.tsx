@@ -16,7 +16,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import { apiRequest } from "@/lib/query-client";
 import * as Haptics from "expo-haptics";
-import { useAuth } from "@/contexts/auth";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -30,13 +29,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function NewClientScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const { canViewClinical } = useAuth();
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [sex, setSex] = useState<"M" | "F" | "">("");
   const [occupation, setOccupation] = useState("");
+
+  const clearForm = () => {
+    setFullName("");
+    setPhone("");
+    setEmail("");
+    setBirthDate("");
+    setSex("");
+    setOccupation("");
+  };
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -52,28 +59,16 @@ export default function NewClientScreen() {
     },
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["/api/clients"] });
+      clearForm();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (canViewClinical) {
-        Alert.alert(
-          "Cliente creada",
-          `¿Deseas agregar la historia clínica de ${data.fullName} ahora?`,
-          [
-            {
-              text: "Ahora no",
-              style: "cancel",
-              onPress: () => { router.replace(`/client/${data.id}`); },
-            },
-            {
-              text: "Agregar historia",
-              onPress: () => { router.replace(`/client/${data.id}?tab=clinical`); },
-            },
-          ]
-        );
-      } else {
-        router.replace(`/client/${data.id}`);
-      }
+      Alert.alert("Cliente generado", `${data.fullName} se creó correctamente.`, [
+        {
+          text: "Aceptar",
+          onPress: () => router.replace("/(tabs)/clients"),
+        },
+      ]);
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => Alert.alert("Error", `No se pudo generar el cliente. ${err.message}`),
   });
 
   return (

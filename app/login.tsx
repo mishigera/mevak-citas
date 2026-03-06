@@ -41,7 +41,12 @@ export default function LoginScreen() {
       await login(email.trim().toLowerCase(), password);
       router.replace("/(tabs)");
     } catch (err: any) {
-      Alert.alert("Error", err.message || "Credenciales incorrectas");
+      const message = String(err?.message || "");
+      if (message.includes("401") || message.toLowerCase().includes("credenciales incorrectas")) {
+        Alert.alert("Inicio de sesión", "Usuario o contraseña no válido");
+      } else {
+        Alert.alert("Error", "No se pudo iniciar sesión. Intenta de nuevo.");
+      }
     } finally {
       setLoading(false);
     }

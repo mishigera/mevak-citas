@@ -21,6 +21,8 @@ export default function UsersScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<typeof ROLES[number]>("FACIALIST");
+  const [editingPasswordUserId, setEditingPasswordUserId] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState("");
 
   const { data: users, isLoading } = useQuery<any[]>({
     queryKey: ["/api/users"],
@@ -49,6 +51,21 @@ export default function UsersScreen() {
       await apiRequest("PATCH", `/api/users/${id}`, { isActive });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/users"] }),
+    onError: (err: Error) => Alert.alert("Error", err.message),
+  });
+
+  const updatePasswordMutation = useMutation({
+    mutationFn: async ({ id, password }: { id: string; password: string }) => {
+      await apiRequest("PATCH", `/api/users/${id}`, { password: password.trim() });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/users"] });
+      setEditingPasswordUserId(null);
+      setNewPassword("");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Éxito", "Contraseña actualizada");
+    },
+    onError: (err: Error) => Alert.alert("Error", err.message),
   });
 
   return (
@@ -93,19 +110,72 @@ export default function UsersScreen() {
               const roleColor = ROLE_COLORS[u.role] || Colors.primary;
               return (
                 <View key={u.id} style={styles.userCard}>
-                  <View style={[styles.userAvatar, { backgroundColor: roleColor + "20" }]}>
-                    <Text style={[styles.userAvatarText, { color: roleColor }]}>{initials}</Text>
-                  </View>
-                  <View style={styles.userInfo}>
-                    <Text style={styles.userName}>{u.name}</Text>
-                    <Text style={styles.userEmail}>{u.email}</Text>
-                    <View style={[styles.rolePill, { backgroundColor: roleColor + "18" }]}>
-                      <Text style={[styles.rolePillText, { color: roleColor }]}>{ROLE_LABELS[u.role]}</Text>
+                  <View style={styles.userMainRow}>
+                    <View style={[styles.userAvatar, { backgroundColor: roleColor + "20" }]}>
+                      <Text style={[styles.userAvatarText, { color: roleColor }]}>{initials}</Text>
+                    </View>
+                    <View style={styles.userInfo}>
+                      <Text style={styles.userName}>{u.name}</Text>
+                      <Text style={styles.userEmail}>{u.email}</Text>
+                      <View style={[styles.rolePill, { backgroundColor: roleColor + "18" }]}> 
+                        <Text style={[styles.rolePillText, { color: roleColor }]}>{ROLE_LABELS[u.role]}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.userActions}>
+                      <Pressable
+                        onPress={() => {
+                          if (editingPasswordUserId === u.id) {
+                            setEditingPasswordUserId(null);
+                            setNewPassword("");
+                            return;
+                          }
+                          setEditingPasswordUserId(u.id);
+                          setNewPassword("");
+                        }}
+                        hitSlop={8}
+                      >
+                        <Ionicons name="key-outline" size={22} color={Colors.primary} />
+                      </Pressable>
+                      <Pressable onPress={() => toggleMutation.mutate({ id: u.id, isActive: !u.isActive })} hitSlop={8}>
+                        <Ionicons name={u.isActive ? "checkmark-circle" : "close-circle"} size={24} color={u.isActive ? Colors.success : Colors.error} />
+                      </Pressable>
                     </View>
                   </View>
-                  <Pressable onPress={() => toggleMutation.mutate({ id: u.id, isActive: !u.isActive })} hitSlop={8}>
-                    <Ionicons name={u.isActive ? "checkmark-circle" : "close-circle"} size={24} color={u.isActive ? Colors.success : Colors.error} />
-                  </Pressable>
+
+                  {editingPasswordUserId === u.id && (
+                    <View style={styles.passwordEditor}>
+                      <TextInput
+                        style={styles.passwordInput}
+                        value={newPassword}
+                        onChangeText={setNewPassword}
+                        secureTextEntry
+                        placeholder="Nueva contraseña"
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                      <View style={styles.passwordActions}>
+                        <Pressable
+                          style={[styles.passwordBtn, styles.passwordCancelBtn]}
+                          onPress={() => {
+                            setEditingPasswordUserId(null);
+                            setNewPassword("");
+                          }}
+                        >
+                          <Text style={styles.passwordCancelText}>Cancelar</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.passwordBtn, styles.passwordSaveBtn, !newPassword.trim() && { opacity: 0.5 }]}
+                          onPress={() => updatePasswordMutation.mutate({ id: u.id, password: newPassword })}
+                          disabled={!newPassword.trim() || updatePasswordMutation.isPending}
+                        >
+                          {updatePasswordMutation.isPending ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                          ) : (
+                            <Text style={styles.passwordSaveText}>Guardar</Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
                 </View>
               );
             })}
@@ -132,13 +202,23 @@ const styles = StyleSheet.create({
   saveBtnText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: "#fff" },
   list: { flex: 1, paddingHorizontal: 16 },
   userList: { gap: 8 },
-  userCard: { backgroundColor: "#fff", borderRadius: 14, flexDirection: "row", alignItems: "center", padding: 14, gap: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+  userCard: { backgroundColor: "#fff", borderRadius: 14, padding: 14, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+  userMainRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   userAvatar: { width: 46, height: 46, borderRadius: 23, justifyContent: "center", alignItems: "center" },
   userAvatarText: { fontFamily: "Nunito_700Bold", fontSize: 16 },
   userInfo: { flex: 1, gap: 3 },
+  userActions: { flexDirection: "row", alignItems: "center", gap: 10 },
   userName: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.text },
   userEmail: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
   rolePill: { alignSelf: "flex-start", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   rolePillText: { fontFamily: "Nunito_700Bold", fontSize: 10 },
+  passwordEditor: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.border, gap: 10 },
+  passwordInput: { backgroundColor: Colors.background, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.text },
+  passwordActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
+  passwordBtn: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, minWidth: 90, alignItems: "center" },
+  passwordCancelBtn: { borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
+  passwordSaveBtn: { backgroundColor: Colors.primary },
+  passwordCancelText: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary },
+  passwordSaveText: { fontFamily: "Nunito_700Bold", fontSize: 13, color: "#fff" },
   center: { justifyContent: "center", alignItems: "center", paddingVertical: 60 },
 });
