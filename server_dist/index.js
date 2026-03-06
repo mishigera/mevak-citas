@@ -894,7 +894,6 @@ function setupErrorHandler(app2) {
   server.listen(
     {
       port,
-      host: "0.0.0.0",
       reusePort: true
     },
     () => {

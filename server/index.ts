@@ -160,7 +160,6 @@ function setupErrorHandler(app: express.Application) {
   server.listen(
     {
       port,
-      host: "0.0.0.0",
       reusePort: true,
     },
     () => {
