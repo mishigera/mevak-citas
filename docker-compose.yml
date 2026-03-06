@@ -30,8 +30,6 @@ services:
     environment:
       PORT: 5000
       DATABASE_URL: postgres://${POSTGRES_USER:-mevak}:${POSTGRES_PASSWORD:-change_this_in_prod}@db:5432/${POSTGRES_DB:-mevak}
-      ADMIN_EMAIL: admin@mevakbeautycenter.com
-      ADMIN_PASSWORD: admin123
     ports:
       - "5000:5000"
 
