@@ -3,6 +3,16 @@ services:
     image: postgres:16-alpine
     container_name: mevak-db
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 60s
+    mem_limit: ${DB_MEM_LIMIT:-1g}
+    cpus: ${DB_CPUS:-1.00}
+    pids_limit: ${DB_PIDS_LIMIT:-256}
+    logging:
+      driver: ${DOCKER_LOG_DRIVER:-json-file}
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: "${DOCKER_LOG_MAX_FILE:-5}"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mevak}
       POSTGRES_USER: ${POSTGRES_USER:-mevak}
@@ -24,6 +34,14 @@ services:
         APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5000}
     container_name: mevak-app
     restart: unless-stopped
+    mem_limit: ${APP_MEM_LIMIT:-768m}
+    cpus: ${APP_CPUS:-1.00}
+    pids_limit: ${APP_PIDS_LIMIT:-256}
+    logging:
+      driver: ${DOCKER_LOG_DRIVER:-json-file}
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: "${DOCKER_LOG_MAX_FILE:-5}"
     depends_on:
       db:
         condition: service_healthy
