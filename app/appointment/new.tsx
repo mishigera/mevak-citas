@@ -8,14 +8,13 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
-  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
-import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
+import { ApiError, apiRequest, getApiUrl, getAuthToken, getErrorMessage } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
 
@@ -93,7 +92,16 @@ export default function NewAppointmentScreen() {
       router.push(`/appointment/${data.id}`);
     },
     onError: (err: Error) => {
-      Alert.alert("Error", err.message);
+      const message = getErrorMessage(err, "No se pudo crear la cita");
+      const isScheduleConflict = err instanceof ApiError && err.status === 409 && /conflicto|bloqueo/i.test(message);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
+      if (isScheduleConflict) {
+        Alert.alert("Horario no disponible", message);
+        return;
+      }
+
+      Alert.alert("Error", message);
     },
   });
 

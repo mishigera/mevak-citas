@@ -1,6 +1,24 @@
 import { fetch } from "expo/fetch";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+export class ApiError extends Error {
+  status: number;
+  details?: unknown;
+
+  constructor(status: number, message: string, details?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.details = details;
+  }
+}
+
+export function getErrorMessage(error: unknown, fallback = "Error inesperado"): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
 function toBaseUrl(raw: string): string {
   const value = raw.trim();
   if (!value) throw new Error("API URL is empty");
@@ -45,8 +63,26 @@ function buildHeaders(data?: unknown): Record<string, string> {
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    const rawBody = (await res.text()).trim();
+    let details: unknown;
+    let message = res.statusText || `HTTP ${res.status}`;
+
+    if (rawBody) {
+      try {
+        details = JSON.parse(rawBody) as unknown;
+      } catch {
+        details = rawBody;
+      }
+
+      if (typeof details === "string") {
+        message = details;
+      } else if (details && typeof details === "object") {
+        const maybeMessage = (details as { message?: unknown }).message;
+        message = typeof maybeMessage === "string" ? maybeMessage : rawBody;
+      }
+    }
+
+    throw new ApiError(res.status, message, details);
   }
 }
 
