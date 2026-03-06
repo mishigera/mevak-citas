@@ -86,6 +86,7 @@ export default function ClientDetailScreen() {
   const [clinical, setClinical] = useState<any>(null);
   const [clinicalEditing, setClinicalEditing] = useState(tabParam === "clinical" && canViewClinical);
   const [selectedLaserSvgKeys, setSelectedLaserSvgKeys] = useState<string[]>([]);
+  const [selectedPackageTemplateId, setSelectedPackageTemplateId] = useState("");
 
   const { data: client, isLoading } = useQuery<any>({
     queryKey: ["/api/clients", id],
@@ -113,6 +114,18 @@ export default function ClientDetailScreen() {
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/clients/${id}/packages`, base);
+      const res = await fetch(url.toString(), { headers: authH() });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const { data: packageCatalog = [] } = useQuery<any[]>({
+    queryKey: ["/api/packages"],
+    enabled: role === "ADMIN" || role === "OWNER",
+    queryFn: async () => {
+      const base = getApiUrl();
+      const url = new URL("/api/packages", base);
       const res = await fetch(url.toString(), { headers: authH() });
       if (!res.ok) return [];
       return res.json();
@@ -199,6 +212,21 @@ export default function ClientDetailScreen() {
     onError: (err: Error) => Alert.alert("Error", err.message),
   });
 
+  const linkPackageMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedPackageTemplateId) throw new Error("Selecciona un paquete");
+      await apiRequest("POST", `/api/clients/${id}/packages`, { packageId: selectedPackageTemplateId });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/clients", id, "packages"] });
+      qc.invalidateQueries({ queryKey: ["/api/appointments"] });
+      setSelectedPackageTemplateId("");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Paquete vinculado", "El paquete quedó registrado en el historial del cliente.");
+    },
+    onError: (err: Error) => Alert.alert("Error", err.message),
+  });
+
   const toggleLaserArea = (svgKey: string) => {
     if (!(role === "ADMIN" || role === "OWNER")) return;
     const next = selectedLaserSvgKeys.includes(svgKey)
@@ -210,6 +238,8 @@ export default function ClientDetailScreen() {
 
   const facialAppts = useMemo(() => (appointments || []).filter((a) => a.type === "FACIAL"), [appointments]);
   const laserAppts = useMemo(() => (appointments || []).filter((a) => a.type === "LASER"), [appointments]);
+  const activePackages = useMemo(() => (packages || []).filter((p) => p.status === "ACTIVE"), [packages]);
+  const packageHistory = useMemo(() => (packages || []).filter((p) => p.status !== "ACTIVE"), [packages]);
 
   const initials = (client?.fullName || "?").split(" ").slice(0, 2).map((w: string) => w[0]?.toUpperCase() || "").join("");
 
@@ -312,11 +342,55 @@ export default function ClientDetailScreen() {
           </View>
         )}
 
-        {(packages || []).map((cp: any) => (
+        {(role === "ADMIN" || role === "OWNER") && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Vincular paquete comprado</Text>
+            {packageCatalog.length === 0 ? (
+              <Text style={styles.emptyText}>No hay paquetes activos para vincular.</Text>
+            ) : (
+              <>
+                <View style={styles.packageCatalogList}>
+                  {packageCatalog.map((pkg: any) => {
+                    const selected = selectedPackageTemplateId === pkg.id;
+                    return (
+                      <Pressable
+                        key={pkg.id}
+                        style={[styles.packageCatalogItem, selected && styles.packageCatalogItemSelected]}
+                        onPress={() => setSelectedPackageTemplateId((prev) => prev === pkg.id ? "" : pkg.id)}
+                      >
+                        <View style={styles.packageCatalogInfo}>
+                          <Text style={[styles.packageCatalogName, selected && { color: Colors.secondary }]}>{pkg.name}</Text>
+                          <Text style={styles.packageCatalogMeta}>{pkg.totalSessions} sesiones · ${pkg.price}</Text>
+                        </View>
+                        {selected && <Ionicons name="checkmark-circle" size={20} color={Colors.secondary} />}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Pressable
+                  style={[styles.linkPackageBtn, (!selectedPackageTemplateId || linkPackageMutation.isPending) && { opacity: 0.5 }]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    linkPackageMutation.mutate();
+                  }}
+                  disabled={!selectedPackageTemplateId || linkPackageMutation.isPending}
+                >
+                  {linkPackageMutation.isPending ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.linkPackageBtnText}>Vincular paquete al cliente</Text>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </View>
+        )}
+
+        {activePackages.map((cp: any) => (
           <View key={cp.id} style={styles.card}>
-            <Text style={styles.cardTitle}>Paquete láser</Text>
+            <Text style={styles.cardTitle}>{cp.package?.name || "Paquete láser"}</Text>
             <View style={styles.progressContainer}>
-              <Text style={styles.progressLabel}>{cp.usedSessions}/{cp.totalSessions} sesiones</Text>
+              <Text style={styles.progressLabel}>Cita {Math.min(cp.usedSessions + 1, cp.totalSessions)}/{cp.totalSessions}</Text>
               <Text style={[styles.progressStatus, { color: cp.status === "ACTIVE" ? Colors.success : Colors.textMuted }]}>
                 {cp.status === "ACTIVE" ? "Activo" : cp.status === "FINISHED" ? "Terminado" : "Pausado"}
               </Text>
@@ -324,9 +398,34 @@ export default function ClientDetailScreen() {
             <View style={styles.progressBar}>
               <View style={[styles.progressFill, { width: `${(cp.usedSessions / cp.totalSessions) * 100}%` as any }]} />
             </View>
+            <Text style={styles.packageUsageText}>Usadas: {cp.usedSessions} · Restantes: {cp.remainingSessions}</Text>
             <Text style={styles.progressDate}>Inicio: {formatDate(cp.startDate)}</Text>
           </View>
         ))}
+
+        {packageHistory.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Historial de paquetes</Text>
+            <View style={styles.packageHistoryList}>
+              {packageHistory.map((cp: any) => (
+                <View key={cp.id} style={styles.packageHistoryRow}>
+                  <View style={styles.packageHistoryInfo}>
+                    <Text style={styles.packageHistoryName}>{cp.package?.name || "Paquete láser"}</Text>
+                    <Text style={styles.packageHistoryMeta}>{cp.usedSessions}/{cp.totalSessions} sesiones · Inicio: {formatDate(cp.startDate)}</Text>
+                  </View>
+                  <Text style={styles.packageHistoryStatus}>{cp.status === "FINISHED" ? "Terminado" : "Pausado"}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {activePackages.length === 0 && packageHistory.length === 0 && (
+          <View style={styles.emptyState}>
+            <Ionicons name="cube-outline" size={40} color={Colors.textMuted} />
+            <Text style={styles.emptyTitle}>Sin paquetes vinculados</Text>
+          </View>
+        )}
 
         {laserAppts.length === 0 ? (
           <View style={styles.emptyState}>
@@ -342,6 +441,11 @@ export default function ClientDetailScreen() {
               </View>
               <StatusPill status={a.status} />
             </View>
+            {a.clientPackage?.totalSessions && a.laserSession?.sessionNumber && (
+              <Text style={styles.apptCardPackage}>
+                📦 {(a.clientPackage?.package?.name || "Paquete")} · Cita {a.laserSession.sessionNumber}/{a.clientPackage.totalSessions}
+              </Text>
+            )}
             {a.staff && <Text style={styles.apptCardStaff}>{a.staff.name}</Text>}
             {a.notes && <Text style={styles.apptCardNotes}>📝 {a.notes}</Text>}
           </Pressable>
@@ -585,6 +689,7 @@ const styles = StyleSheet.create({
   apptCardDate: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.text },
   apptCardTime: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
   apptCardServices: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textSecondary },
+  apptCardPackage: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.secondary },
   apptCardStaff: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
   apptCardPayment: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.success },
   apptCardNotes: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted, fontStyle: "italic" },
@@ -593,7 +698,22 @@ const styles = StyleSheet.create({
   progressStatus: { fontFamily: "Nunito_600SemiBold", fontSize: 13 },
   progressBar: { height: 8, backgroundColor: Colors.border, borderRadius: 4, overflow: "hidden" },
   progressFill: { height: 8, backgroundColor: Colors.secondary, borderRadius: 4 },
+  packageUsageText: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary },
   progressDate: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
+  packageCatalogList: { gap: 8 },
+  packageCatalogItem: { borderWidth: 2, borderColor: Colors.border, borderRadius: 12, padding: 12, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.background },
+  packageCatalogItemSelected: { borderColor: Colors.secondary, backgroundColor: Colors.secondary + "12" },
+  packageCatalogInfo: { flex: 1 },
+  packageCatalogName: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.text },
+  packageCatalogMeta: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textSecondary },
+  linkPackageBtn: { marginTop: 8, backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 12, alignItems: "center" },
+  linkPackageBtnText: { fontFamily: "Nunito_700Bold", fontSize: 14, color: "#fff" },
+  packageHistoryList: { gap: 10 },
+  packageHistoryRow: { flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: 1, borderBottomColor: Colors.border + "60", paddingBottom: 8 },
+  packageHistoryInfo: { flex: 1, gap: 2 },
+  packageHistoryName: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.text },
+  packageHistoryMeta: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
+  packageHistoryStatus: { fontFamily: "Nunito_700Bold", fontSize: 12, color: Colors.textSecondary },
   phototypeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   phototypeCard: { flex: 1, minWidth: "28%", alignItems: "center", paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.surface, gap: 4 },
   phototypeCardSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },

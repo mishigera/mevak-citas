@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "node:http";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "crypto";
-import { storage, type Role, type AppointmentStatus, type PaymentMethod } from "./storage";
+import { storage, type Role, type AppointmentStatus, type PaymentMethod, type ClientPackage } from "./storage";
 
 declare global {
   namespace Express {
@@ -45,6 +45,22 @@ function requireRole(...roles: Role[]) {
     req.userId = session.userId;
     req.userRole = session.role;
     next();
+  };
+}
+
+function enrichClientPackage(clientPackage: ClientPackage | null | undefined) {
+  if (!clientPackage) return null;
+  const pkg = storage.packages.get(clientPackage.packageId);
+  return {
+    ...clientPackage,
+    package: pkg
+      ? {
+          id: pkg.id,
+          name: pkg.name,
+          totalSessions: pkg.totalSessions,
+          price: pkg.price,
+        }
+      : null,
   };
 }
 
@@ -190,16 +206,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // CLIENT PACKAGES
   app.get("/api/clients/:id/packages", requireAuth, (req, res) => {
-    res.json(Array.from(storage.clientPackages.values()).filter((p) => p.clientId === paramId(req)));
+    const clientId = paramId(req);
+    const packages = Array.from(storage.clientPackages.values())
+      .filter((p) => p.clientId === clientId)
+      .sort((a, b) => b.startDate.localeCompare(a.startDate))
+      .map((p) => enrichClientPackage(p));
+    res.json(packages);
   });
 
   app.post("/api/clients/:id/packages", requireRole("ADMIN", "OWNER"), (req, res) => {
     const clientId = paramId(req);
+    const client = storage.clients.get(clientId);
+    if (!client) return res.status(404).json({ message: "Cliente no encontrado" });
     const pkg = storage.packages.get(req.body.packageId);
-    if (!pkg) return res.status(404).json({ message: "Paquete no encontrado" });
+    if (!pkg || !pkg.isActive) return res.status(404).json({ message: "Paquete no encontrado" });
     const cp = { id: randomUUID(), clientId, packageId: pkg.id, totalSessions: pkg.totalSessions, usedSessions: 0, remainingSessions: pkg.totalSessions, startDate: new Date().toISOString(), status: "ACTIVE" as const };
     storage.clientPackages.set(cp.id, cp);
-    res.status(201).json(cp);
+    res.status(201).json(enrichClientPackage(cp));
   });
 
   // SERVICES
@@ -264,8 +287,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const services = Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === appt.id).map((s) => storage.services.get(s.serviceId)).filter(Boolean);
     const payment = Array.from(storage.payments.values()).find((p) => p.appointmentId === appt.id);
     const laserSession = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === appt.id);
-    let clientPackage = null;
-    if (laserSession?.clientPackageId) clientPackage = storage.clientPackages.get(laserSession.clientPackageId);
+    const clientPackage = enrichClientPackage(
+      laserSession?.clientPackageId ? storage.clientPackages.get(laserSession.clientPackageId) : null,
+    );
     res.json({ ...appt, client, staff: staff ? { id: staff.id, name: staff.name, role: staff.role } : null, services, payment, laserSession, clientPackage });
   });
 
@@ -357,9 +381,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!appt) return res.status(404).json({ message: "Cita no encontrada" });
     const existing = Array.from(storage.payments.values()).find((p) => p.appointmentId === appointmentId);
     if (existing) return res.status(409).json({ message: "Ya existe un pago" });
-    const total = Number(totalAmount) || 0;
+
+    const selectedClientPackageId = req.body.clientPackageId as string | undefined;
+    if (method === "INCLUDED" && !selectedClientPackageId) {
+      return res.status(400).json({ message: "Debes seleccionar un paquete para pago incluido" });
+    }
+    if (selectedClientPackageId && appt.type !== "LASER") {
+      return res.status(400).json({ message: "Solo las citas láser pueden usar paquete" });
+    }
+
+    let consumedSessionNumber: number | undefined;
+    if (selectedClientPackageId) {
+      const cp = storage.clientPackages.get(selectedClientPackageId);
+      if (!cp || cp.clientId !== appt.clientId) {
+        return res.status(400).json({ message: "El paquete no pertenece al cliente de la cita" });
+      }
+      if (cp.status !== "ACTIVE" || cp.remainingSessions <= 0) {
+        return res.status(400).json({ message: "El paquete ya no tiene sesiones disponibles" });
+      }
+
+      cp.usedSessions += 1;
+      cp.remainingSessions = Math.max(cp.totalSessions - cp.usedSessions, 0);
+      if (cp.remainingSessions <= 0) cp.status = "FINISHED";
+      storage.clientPackages.set(cp.id, cp);
+      consumedSessionNumber = cp.usedSessions;
+    }
+
+    const resolvedMethod = (selectedClientPackageId ? "INCLUDED" : method) as PaymentMethod;
+    if (!["CASH", "CARD", "INCLUDED"].includes(resolvedMethod)) {
+      return res.status(400).json({ message: "Método de pago inválido" });
+    }
+    const total = resolvedMethod === "INCLUDED" ? 0 : Number(totalAmount) || 0;
     const isFacial = appt.type === "FACIAL";
-    const payment = { id: randomUUID(), appointmentId, method: method as PaymentMethod, totalAmount: total, ownerNetAmount: isFacial ? Math.floor(total / 2) : total, facialistNetAmount: isFacial ? Math.ceil(total / 2) : 0, facialistPaidFlag: false, createdAt: new Date().toISOString() };
+    const payment = { id: randomUUID(), appointmentId, method: resolvedMethod, totalAmount: total, ownerNetAmount: isFacial ? Math.floor(total / 2) : total, facialistNetAmount: isFacial ? Math.ceil(total / 2) : 0, facialistPaidFlag: false, createdAt: new Date().toISOString() };
     storage.payments.set(payment.id, payment);
     appt.status = "DONE";
     storage.appointments.set(appt.id, appt);
@@ -376,22 +430,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingSession = Array.from(storage.laserSessions.values()).find((session) => session.appointmentId === appt.id);
       if (existingSession) {
         existingSession.areasSnapshotJson = areasSnapshotJson;
-        if (req.body.clientPackageId) existingSession.clientPackageId = req.body.clientPackageId;
+        if (selectedClientPackageId) existingSession.clientPackageId = selectedClientPackageId;
+        if (consumedSessionNumber !== undefined) existingSession.sessionNumber = consumedSessionNumber;
         storage.laserSessions.set(existingSession.id, existingSession);
       } else {
         const session = {
           id: randomUUID(),
           appointmentId: appt.id,
-          clientPackageId: req.body.clientPackageId,
+          clientPackageId: selectedClientPackageId,
+          sessionNumber: consumedSessionNumber,
           areasSnapshotJson,
         };
         storage.laserSessions.set(session.id, session);
       }
-    }
-
-    if (req.body.clientPackageId) {
-      const cp = storage.clientPackages.get(req.body.clientPackageId);
-      if (cp) { cp.usedSessions += 1; cp.remainingSessions = cp.totalSessions - cp.usedSessions; if (cp.remainingSessions <= 0) cp.status = "FINISHED"; storage.clientPackages.set(cp.id, cp); }
     }
     res.status(201).json(payment);
   });
@@ -467,7 +518,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const services = Array.from(storage.appointmentServices.values()).filter((s) => s.appointmentId === a.id).map((s) => storage.services.get(s.serviceId)).filter(Boolean);
         const payment = Array.from(storage.payments.values()).find((p) => p.appointmentId === a.id);
         const laserSession = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === a.id) || null;
-        return { ...a, staff: staff ? { id: staff.id, name: staff.name } : null, services, payment, laserSession };
+        const clientPackage = enrichClientPackage(
+          laserSession?.clientPackageId ? storage.clientPackages.get(laserSession.clientPackageId) : null,
+        );
+        return { ...a, staff: staff ? { id: staff.id, name: staff.name } : null, services, payment, laserSession, clientPackage };
       });
     res.json(appts);
   });

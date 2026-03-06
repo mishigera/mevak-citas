@@ -282,6 +282,7 @@ export default function AppointmentDetailScreen() {
   const isDone = appt.status === "DONE";
   const isScheduledOrArrived = appt.status === "SCHEDULED" || appt.status === "ARRIVED";
   const isNoShow = appt.status === "NO_SHOW";
+  const selectableClientPackages = (clientPackages || []).filter((cp) => cp.status === "ACTIVE" && cp.remainingSessions > 0);
   const selectedAreaSvgKeysFromClient = clientLaserSelections
     .map((selection: any) => laserAreas.find((area: any) => area.id === selection.areaId)?.svgKey)
     .filter(Boolean) as string[];
@@ -289,6 +290,14 @@ export default function AppointmentDetailScreen() {
     ? appt.laserSession.areasSnapshotJson
     : selectedAreaSvgKeysFromClient) as string[];
   const laserPowerAreas = (laserAreas || []).map((area: any) => area.name);
+  const packageProgressText = (() => {
+    if (!appt.clientPackage?.totalSessions) return "";
+    const total = appt.clientPackage.totalSessions;
+    const current = appt.laserSession?.sessionNumber
+      ?? (isDone ? appt.clientPackage.usedSessions : appt.clientPackage.usedSessions + 1);
+    const clampedCurrent = Math.min(Math.max(current, 1), total);
+    return `${clampedCurrent}/${total}`;
+  })();
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -383,7 +392,7 @@ export default function AppointmentDetailScreen() {
               <View style={styles.packageBadge}>
                 <Ionicons name="cube" size={16} color={Colors.secondary} />
                 <Text style={styles.packageBadgeText}>
-                  Paquete: sesión {appt.clientPackage.usedSessions + 1}/{appt.clientPackage.totalSessions}
+                  {(appt.clientPackage.package?.name || "Paquete láser")} · Cita {packageProgressText}
                 </Text>
               </View>
             )}
@@ -450,10 +459,11 @@ export default function AppointmentDetailScreen() {
           )}
 
           {/* LASER PACKAGE */}
-          {appt.type === "LASER" && !isDone && !isNoShow && (clientPackages?.length ?? 0) > 0 && (
+          {appt.type === "LASER" && !isDone && !isNoShow && selectableClientPackages.length > 0 && (
             <SectionCard title="Paquete láser">
-              {clientPackages?.map((cp) => {
+              {selectableClientPackages.map((cp) => {
                 const selected = selectedPackageId === cp.id;
+                const nextSession = Math.min(cp.usedSessions + 1, cp.totalSessions);
                 return (
                   <Pressable
                     key={cp.id}
@@ -461,11 +471,12 @@ export default function AppointmentDetailScreen() {
                     onPress={() => setSelectedPackageId(selected ? "" : cp.id)}
                   >
                     <View style={styles.pkgOptionContent}>
-                      <Text style={[styles.pkgOptionName, selected && { color: Colors.secondary }]}>
-                        Sesión {cp.usedSessions + 1} / {cp.totalSessions}
+                      <Text style={[styles.pkgOptionName, selected && { color: Colors.secondary }]}> 
+                        {cp.package?.name || "Paquete láser"}
                       </Text>
-                      <Text style={styles.pkgOptionStatus}>{cp.status === "ACTIVE" ? "Activo" : "Terminado"}</Text>
+                      <Text style={styles.pkgOptionStatus}>Activo</Text>
                     </View>
+                    <Text style={styles.pkgOptionMeta}>Próxima cita {nextSession}/{cp.totalSessions} · Restantes: {cp.remainingSessions}</Text>
                     <View style={styles.pkgProgress}>
                       <View style={[styles.pkgProgressFill, { width: `${(cp.usedSessions / cp.totalSessions) * 100}%` }]} />
                     </View>
@@ -473,6 +484,12 @@ export default function AppointmentDetailScreen() {
                   </Pressable>
                 );
               })}
+            </SectionCard>
+          )}
+
+          {appt.type === "LASER" && !isDone && !isNoShow && selectableClientPackages.length === 0 && (
+            <SectionCard title="Paquete láser">
+              <Text style={styles.emptyText}>No hay paquetes activos vinculados para esta clienta.</Text>
             </SectionCard>
           )}
 
@@ -566,7 +583,7 @@ export default function AppointmentDetailScreen() {
                     <Text style={styles.finishBtnText}>Registrar pago y terminar</Text>
                   </Pressable>
                 ) : (
-                  <Text style={styles.emptyText}>Marca "Llegó" para registrar el pago</Text>
+                  <Text style={styles.emptyText}>Marca &quot;Llegó&quot; para registrar el pago</Text>
                 )
               ) : (
                 <>
@@ -651,6 +668,11 @@ export default function AppointmentDetailScreen() {
                     <Text style={styles.historyStatus}>{STATUS_LABELS[h.status] || h.status}</Text>
                     {isLaserView && h.type === "LASER" ? (
                       <>
+                        {!!h.clientPackage?.totalSessions && !!h.laserSession?.sessionNumber && (
+                          <Text style={styles.historyMeta}>
+                            📦 {(h.clientPackage.package?.name || "Paquete láser")} · Cita {h.laserSession.sessionNumber}/{h.clientPackage.totalSessions}
+                          </Text>
+                        )}
                         {!!h.laserSession?.powerByArea && (
                           <Text style={styles.historyMeta} numberOfLines={2}>
                             {Object.entries(h.laserSession.powerByArea).map(([area, val]) => `${area}: ${val}`).join(" · ")}
@@ -773,6 +795,7 @@ const styles = StyleSheet.create({
   pkgOptionContent: { flexDirection: "row", justifyContent: "space-between" },
   pkgOptionName: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.text },
   pkgOptionStatus: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
+  pkgOptionMeta: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary },
   pkgProgress: { height: 6, backgroundColor: Colors.border, borderRadius: 3, overflow: "hidden" },
   pkgProgressFill: { height: 6, backgroundColor: Colors.secondary, borderRadius: 3 },
   notesInput: { backgroundColor: Colors.background, borderRadius: 10, padding: 12, minHeight: 80, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.text, textAlignVertical: "top" },
