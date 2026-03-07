@@ -214,7 +214,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(packages);
   });
 
-  app.post("/api/clients/:id/packages", requireRole("ADMIN", "OWNER"), (req, res) => {
+  app.post("/api/clients/:id/packages", requireRole("ADMIN", "OWNER", "RECEPTION"), (req, res) => {
     const clientId = paramId(req);
     const client = storage.clients.get(clientId);
     if (!client) return res.status(404).json({ message: "Cliente no encontrado" });

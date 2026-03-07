@@ -35,7 +35,7 @@ export default function NewClientScreen() {
   const [birthDate, setBirthDate] = useState("");
   const [sex, setSex] = useState<"M" | "F" | "">("");
   const [occupation, setOccupation] = useState("");
-
+  
   const clearForm = () => {
     setFullName("");
     setPhone("");
@@ -157,6 +157,7 @@ export default function NewClientScreen() {
         >
           {createMutation.isPending ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Guardar cliente</Text>}
         </Pressable>
+      
         <View style={{ height: 60 }} />
       </ScrollView>
     </View>

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, TextInput } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -8,6 +8,7 @@ import { Colors } from "@/constants/colors";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
+import { toast, ToastContainer } from "react-toastify";
 
 export default function ServicesScreen() {
   const insets = useSafeAreaInsets();
@@ -32,12 +33,20 @@ export default function ServicesScreen() {
       await apiRequest("POST", "/api/services", { name: name.trim(), type, price: Number(price) });
     },
     onSuccess: () => {
+      console.log("Service created successfully");
       qc.invalidateQueries({ queryKey: ["/api/services"] });
       setShowForm(false);
       setName(""); setPrice("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      
+        toast.success("Servicio creado correctamente");
+      
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) =>{
+      if (Platform.OS === "web") {
+        toast.error(err.message || "Ocurrió un error al crear el servicio");
+      }
+  }
   });
 
   const toggleMutation = useMutation({
@@ -103,6 +112,19 @@ export default function ServicesScreen() {
         )}
         <View style={{ height: 60 }} />
       </ScrollView>
+
+      {Platform.OS === "web" && (
+        <ToastContainer
+          position="top-right"
+          autoClose={2500}
+          pauseOnFocusLoss={false}
+          newestOnTop
+          closeOnClick
+          pauseOnHover
+          draggable
+          theme="light"
+        />
+      )}
     </View>
   );
 }

@@ -75,7 +75,7 @@ export default function ClientDetailScreen() {
   const availableTabs = useMemo(() => {
     if (role === "FACIALIST") return ["Resumen", "Faciales"] as const;
     if (role === "OWNER") return ["Resumen", "Láser", "Clínica"] as const;
-    if (role === "RECEPTION") return ["Resumen"] as const;
+    if (role === "RECEPTION") return ["Resumen", "Láser"] as const;
     return ["Resumen", "Faciales", "Láser", "Clínica"] as const;
   }, [role]);
 
@@ -122,7 +122,7 @@ export default function ClientDetailScreen() {
 
   const { data: packageCatalog = [] } = useQuery<any[]>({
     queryKey: ["/api/packages"],
-    enabled: role === "ADMIN" || role === "OWNER",
+    enabled: role === "ADMIN" || role === "OWNER" || role === "RECEPTION",
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/packages", base);
@@ -342,7 +342,7 @@ export default function ClientDetailScreen() {
           </View>
         )}
 
-        {(role === "ADMIN" || role === "OWNER") && (
+        {(role === "ADMIN" || role === "OWNER" || role === "RECEPTION") && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Vincular paquete comprado</Text>
             {packageCatalog.length === 0 ? (

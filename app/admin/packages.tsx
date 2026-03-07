@@ -8,6 +8,7 @@ import { Colors } from "@/constants/colors";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
+import { toast } from "react-toastify";
 
 export default function PackagesScreen() {
   const insets = useSafeAreaInsets();
@@ -32,9 +33,12 @@ export default function PackagesScreen() {
       await apiRequest("POST", "/api/packages", { name: name.trim(), totalSessions: Number(sessions), price: Number(price) });
     },
     onSuccess: () => {
+      alert("Paquete creado correctamente");
+      toast.success("Paquete creado correctamente");
       qc.invalidateQueries({ queryKey: ["/api/packages"] });
       setShowForm(false); setName(""); setSessions(""); setPrice("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+         
     },
     onError: (err: Error) => Alert.alert("Error", err.message),
   });
