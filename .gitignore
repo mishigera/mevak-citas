@@ -39,3 +39,7 @@ yarn-error.*
 .vercel
 
 .env
+
+# Arnés de desarrollo con IA (memoria local, no se comparte)
+.ai/
+CLAUDE.md
