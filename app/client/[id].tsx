@@ -21,6 +21,15 @@ import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
 import { LaserBodyMap } from "@/components/LaserBodyMap";
 
+/**
+ * Referencia estable para los `useQuery` sin datos todavía.
+ *
+ * Escribir `= []` en el destructuring crea un array NUEVO en cada render. Cuando un
+ * `useEffect` depende de ese valor, la dependencia cambia siempre y el efecto se
+ * reejecuta sin fin. Con una constante de módulo la identidad no cambia.
+ */
+const SIN_ELEMENTOS: any[] = [];
+
 const PHOTOTYPES = [
   { num: 1, skin: "#FDECD0", desc: "Siempre se quema, nunca se broncea. Muy blanca." },
   { num: 2, skin: "#F8D5B0", desc: "Generalmente se quema, rara vez se broncea." },
@@ -120,7 +129,7 @@ export default function ClientDetailScreen() {
     },
   });
 
-  const { data: packageCatalog = [] } = useQuery<any[]>({
+  const { data: packageCatalog = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/packages"],
     enabled: role === "ADMIN" || role === "OWNER" || role === "RECEPTION",
     queryFn: async () => {
@@ -132,7 +141,7 @@ export default function ClientDetailScreen() {
     },
   });
 
-  const { data: laserAreas = [] } = useQuery<any[]>({
+  const { data: laserAreas = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/laser-areas"],
     enabled: role === "ADMIN" || role === "OWNER",
     queryFn: async () => {
@@ -144,7 +153,7 @@ export default function ClientDetailScreen() {
     },
   });
 
-  const { data: clientLaserSelections = [] } = useQuery<any[]>({
+  const { data: clientLaserSelections = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/clients", id, "laser-areas"],
     enabled: role === "ADMIN" || role === "OWNER",
     queryFn: async () => {

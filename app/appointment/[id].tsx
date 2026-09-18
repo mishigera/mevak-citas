@@ -21,6 +21,15 @@ import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
 import { LaserBodyMap } from "@/components/LaserBodyMap";
 
+/**
+ * Referencia estable para los `useQuery` sin datos todavía.
+ *
+ * Escribir `= []` en el destructuring crea un array NUEVO en cada render. Cuando un
+ * `useEffect` depende de ese valor, la dependencia cambia siempre y el efecto se
+ * reejecuta sin fin. Con una constante de módulo la identidad no cambia.
+ */
+const SIN_ELEMENTOS: any[] = [];
+
 const STATUS_LABELS: Record<string, string> = {
   SCHEDULED: "Agendada",
   ARRIVED: "Llegó",
@@ -138,7 +147,7 @@ export default function AppointmentDetailScreen() {
     },
   });
 
-  const { data: laserAreas = [] } = useQuery<any[]>({
+  const { data: laserAreas = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/laser-areas"],
     enabled: appt?.type === "LASER",
     queryFn: async () => {
@@ -150,7 +159,7 @@ export default function AppointmentDetailScreen() {
     },
   });
 
-  const { data: clientLaserSelections = [] } = useQuery<any[]>({
+  const { data: clientLaserSelections = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/clients", appt?.clientId, "laser-areas"],
     enabled: appt?.type === "LASER" && !!appt?.clientId,
     queryFn: async () => {
