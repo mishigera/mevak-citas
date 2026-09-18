@@ -1,0 +1,161 @@
+/**
+ * Harness para los tests de pantallas de `app/`.
+ *
+ * Cada archivo de test de pantalla debe declarar arriba del todo:
+ *   jest.mock("@/contexts/auth", () => require("../../setup/auth-mock"));
+ */
+import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, fireEvent, type RenderOptions } from "@testing-library/react-native";
+import { fetch as expoFetch } from "expo/fetch";
+import { useLocalSearchParams, router } from "expo-router";
+
+export * from "./auth-mock";
+
+const mockFetch = expoFetch as unknown as jest.Mock;
+
+/** El router mockeado, para aseverar sobre la navegación. */
+export const mockRouter = router as unknown as {
+  push: jest.Mock; replace: jest.Mock; back: jest.Mock; navigate: jest.Mock;
+  dismiss: jest.Mock; dismissAll: jest.Mock; setParams: jest.Mock;
+  canGoBack: jest.Mock;
+};
+
+/** Fija los parámetros de ruta que verá la pantalla (`useLocalSearchParams`). */
+export function setRouteParams(params: Record<string, string>) {
+  (useLocalSearchParams as unknown as jest.Mock).mockReturnValue(params);
+}
+
+type Respuesta = unknown | ((body: unknown) => unknown);
+type Rutas = Record<string, Respuesta>;
+
+const rutasActivas: Rutas = {};
+const llamadas: { method: string; path: string; body: unknown }[] = [];
+
+/**
+ * Define qué responde la API. Las claves son `"GET /api/clients"` o solo `"/api/clients"`
+ * (cualquier método). Gana la coincidencia más específica.
+ * Un valor función recibe el cuerpo de la petición y devuelve la respuesta.
+ * Para forzar un error: `{ __status: 500, message: "..." }`.
+ */
+export function mockApi(rutas: Rutas) {
+  Object.assign(rutasActivas, rutas);
+}
+
+/** Todo lo que la pantalla pidió a la API, en orden. */
+export function apiCalls() {
+  return llamadas;
+}
+
+export function resetApi() {
+  Object.keys(rutasActivas).forEach((k) => delete rutasActivas[k]);
+  llamadas.length = 0;
+  mockFetch.mockReset();
+  mockFetch.mockImplementation(async (url: string, opciones?: { method?: string; body?: string }) => {
+    const path = new URL(url).pathname;
+    const method = (opciones?.method ?? "GET").toUpperCase();
+    const body = opciones?.body ? JSON.parse(opciones.body) : undefined;
+    llamadas.push({ method, path, body });
+
+    const definicion =
+      rutasActivas[`${method} ${path}`] ?? rutasActivas[path] ?? undefined;
+
+    if (definicion === undefined) {
+      return respuesta({ message: `Sin mock para ${method} ${path}` }, 404);
+    }
+
+    const valor = typeof definicion === "function"
+      ? (definicion as (b: unknown) => unknown)(body)
+      : definicion;
+
+    const status = (valor as { __status?: number })?.__status;
+    return respuesta(valor, status ?? 200);
+  });
+}
+
+function respuesta(cuerpo: unknown, status: number) {
+  const texto = JSON.stringify(cuerpo);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: "",
+    text: async () => texto,
+    json: async () => cuerpo,
+  };
+}
+
+/** Renderiza una pantalla con QueryClient limpio. */
+export function renderScreen(ui: React.ReactElement, opciones?: RenderOptions) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, staleTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+
+  clientesVivos.push(queryClient);
+  return { queryClient, ...render(ui, { wrapper, ...opciones }) };
+}
+
+/**
+ * Los QueryClient dejan observadores y temporizadores activos al terminar el test,
+ * y Jest se queja de que el worker no cierra. Se limpian aquí.
+ */
+const clientesVivos: QueryClient[] = [];
+
+afterEach(() => {
+  clientesVivos.forEach((c) => {
+    c.cancelQueries();
+    c.clear();
+    c.unmount();
+  });
+  clientesVivos.length = 0;
+});
+
+/** Datos de ejemplo reutilizables entre pantallas. */
+export const fixtures = {
+  cliente: (over: Record<string, unknown> = {}) => ({
+    id: "c1", fullName: "María López", phone: "5551234567",
+    email: "maria@test.com", sex: "F", createdAt: "2026-01-15T10:00:00.000Z", ...over,
+  }),
+  staff: (over: Record<string, unknown> = {}) => ({
+    id: "u1", name: "Dueña", email: "duena@mevak.test", role: "OWNER",
+    isActive: true, createdAt: "2026-01-01T00:00:00.000Z", ...over,
+  }),
+  cita: (over: Record<string, unknown> = {}) => ({
+    id: "a1", dateTimeStart: "2026-10-01T10:00:00.000Z",
+    dateTimeEnd: "2026-10-01T11:00:00.000Z", clientId: "c1", staffId: "u1",
+    type: "FACIAL", status: "SCHEDULED", ...over,
+  }),
+  servicio: (over: Record<string, unknown> = {}) => ({
+    id: "s1", name: "Limpieza facial", type: "FACIAL", price: 500, isActive: true, ...over,
+  }),
+  paquete: (over: Record<string, unknown> = {}) => ({
+    id: "p1", name: "Láser 6 sesiones", type: "LASER",
+    totalSessions: 6, price: 6000, isActive: true, ...over,
+  }),
+  area: (over: Record<string, unknown> = {}) => ({
+    id: "la1", name: "Axila", svgKey: "axila", bodySide: "both", isActive: true, ...over,
+  }),
+};
+
+/**
+ * Pulsa el botón que contiene un icono concreto (`<Ionicons name="add" />`).
+ * Más estable que buscar por `hitSlop` o por posición: RNTL propaga el press
+ * hacia el primer ancestro con manejador.
+ */
+export function pressIcon(name: string, indice = 0) {
+  const iconos = screen.UNSAFE_queryAllByProps({ name });
+  const icono = iconos[indice];
+  if (!icono) {
+    throw new Error(
+      `No hay ningún icono "${name}"${indice ? ` en la posición ${indice}` : ""}. ` +
+        `Disponibles: ${[...new Set(screen.UNSAFE_queryAllByProps({ size: 24 }).map((n) => n.props.name))].join(", ")}`,
+    );
+  }
+  fireEvent.press(icono);
+}

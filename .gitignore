@@ -43,3 +43,9 @@ yarn-error.*
 # Arnés de desarrollo con IA (memoria local, no se comparte)
 .ai/
 CLAUDE.md
+
+# tests
+coverage/
+
+# estado local del despliegue
+.deploy/
