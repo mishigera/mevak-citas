@@ -1,0 +1,15 @@
+[Unit]
+Description=Comprueba cada 5 minutos si hay que desplegar Mevak
+
+[Timer]
+# Primer disparo 2 min después de arrancar la máquina, luego cada 5 minutos.
+OnBootSec=2min
+OnUnitActiveSec=5min
+# Reparte el disparo para no coincidir siempre con el mismo segundo.
+RandomizedDelaySec=30
+# Si el servidor estuvo apagado, dispara al volver en lugar de esperar al siguiente turno.
+Persistent=true
+Unit=mevak-deploy.service
+
+[Install]
+WantedBy=timers.target

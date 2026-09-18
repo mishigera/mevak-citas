@@ -52,6 +52,19 @@ services:
       ADMIN_PASSWORD: admin123
     ports:
       - "5000:5000"
+    # Un 401 en /api/auth/me es la señal más barata de "sano de verdad": significa que
+    # Express responde Y que `storage.ready` se resolvió, lo que exige que Postgres
+    # estuviera disponible y las entidades cargadas. Node 22 trae `fetch` global.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5000/api/auth/me').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
 volumes:
   mevak_postgres_data:

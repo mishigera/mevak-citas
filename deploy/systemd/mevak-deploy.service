@@ -1,0 +1,27 @@
+[Unit]
+Description=Despliegue de Mevak desde el repositorio
+Documentation=file:///opt/mevak/deploy/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+
+# Ajusta estos tres a tu servidor.
+User=mevak
+WorkingDirectory=/opt/mevak
+ExecStart=/opt/mevak/scripts/deploy.sh
+
+# El script ya trae su propio bloqueo, pero esto evita solapes desde systemd.
+TimeoutStartSec=1800
+
+# Si falla, no reintenta solo: el timer volverá a dispararlo y así no se
+# machaca producción en bucle si hay un commit roto.
+Restart=no
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
