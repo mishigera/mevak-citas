@@ -18,7 +18,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-mevak}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_in_prod}
     ports:
-      - "5432:5432"
+      # En macOS el 5432 suele estar ocupado por un Postgres local.
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - mevak_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -51,7 +52,9 @@ services:
       ADMIN_EMAIL: admin@mevakbeautycenter.com
       ADMIN_PASSWORD: admin123
     ports:
-      - "5000:5000"
+      # En macOS el 5000 lo ocupa el receptor de AirPlay (ControlCenter).
+      # Cambia APP_PORT en tu .env si te choca.
+      - "${APP_PORT:-5000}:5000"
     # Un 401 en /api/auth/me es la señal más barata de "sano de verdad": significa que
     # Express responde Y que `storage.ready` se resolvió, lo que exige que Postgres
     # estuviera disponible y las entidades cargadas. Node 22 trae `fetch` global.
