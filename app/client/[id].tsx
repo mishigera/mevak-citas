@@ -4,17 +4,20 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Pressable,
   ActivityIndicator,
   Alert,
   TextInput,
   Switch,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
+import { Radius, Space } from "@/constants/theme";
+import { Screen, ScreenScroll } from "@/components/Screen";
+import { GlassSegmented } from "@/components/glass";
+import { PressableMotion, Stagger } from "@/components/motion";
+import { CargandoLista } from "@/components/Estados";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import { useAuth } from "@/contexts/auth";
@@ -75,7 +78,6 @@ function authH() {
 }
 
 export default function ClientDetailScreen() {
-  const insets = useSafeAreaInsets();
   const { id, tab: tabParam } = useLocalSearchParams<{ id: string; tab?: string }>();
   const qc = useQueryClient();
   const { canViewClinical, user } = useAuth();
@@ -254,16 +256,22 @@ export default function ClientDetailScreen() {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator color={Colors.primary} size="large" />
-      </View>
+      <Screen
+        title="Cliente"
+        hasTabBar={false}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/clients"))}
+      >
+        <ScreenScroll>
+          <CargandoLista filas={3} />
+        </ScreenScroll>
+      </Screen>
     );
   }
 
   function renderResumen() {
     const recentAppts = (appointments || []).slice(0, 5);
     return (
-      <View style={styles.tabContent}>
+      <Stagger style={styles.tabContent}>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Información personal</Text>
           {[
@@ -280,43 +288,45 @@ export default function ClientDetailScreen() {
           ))}
         </View>
 
-        <Pressable
-          style={({ pressed }) => [styles.newApptBtn, pressed && { opacity: 0.8 }]}
+        <PressableMotion
+          gesto="elevar"
+          accessibilityLabel="Nueva cita"
+          style={styles.newApptBtn}
           onPress={() => router.push({ pathname: "/appointment/new", params: { clientId: id, clientName: client?.fullName } })}
         >
           <Ionicons name="add-circle-outline" size={20} color="#fff" />
           <Text style={styles.newApptBtnText}>Nueva cita</Text>
-        </Pressable>
+        </PressableMotion>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Últimas citas</Text>
           {recentAppts.length === 0 ? (
             <Text style={styles.emptyText}>Sin citas registradas</Text>
           ) : recentAppts.map((a: any) => (
-            <Pressable key={a.id} style={styles.apptRow} onPress={() => router.push(`/appointment/${a.id}`)}>
+            <PressableMotion key={a.id} gesto="sutil" style={styles.apptRow} onPress={() => router.push(`/appointment/${a.id}`)}>
               <View style={[styles.apptTypeDot, { backgroundColor: a.type === "LASER" ? Colors.secondary : Colors.accent }]} />
               <View style={styles.apptRowContent}>
                 <Text style={styles.apptRowDate}>{formatDate(a.dateTimeStart)}</Text>
                 <Text style={styles.apptRowTime}>{formatTime(a.dateTimeStart)} · {a.type === "LASER" ? "Láser" : "Facial"}</Text>
               </View>
               <StatusPill status={a.status} />
-            </Pressable>
+            </PressableMotion>
           ))}
         </View>
-      </View>
+      </Stagger>
     );
   }
 
   function renderFaciales() {
     return (
-      <View style={styles.tabContent}>
+      <Stagger style={styles.tabContent}>
         {facialAppts.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="sparkles-outline" size={40} color={Colors.textMuted} />
             <Text style={styles.emptyTitle}>Sin citas faciales</Text>
           </View>
         ) : facialAppts.map((a: any) => (
-          <Pressable key={a.id} style={[styles.card, { padding: 14 }]} onPress={() => router.push(`/appointment/${a.id}`)}>
+          <PressableMotion key={a.id} gesto="elevar" style={[styles.card, { padding: 14 }]} onPress={() => router.push(`/appointment/${a.id}`)}>
             <View style={styles.apptCardHeader}>
               <View>
                 <Text style={styles.apptCardDate}>{formatDate(a.dateTimeStart)}</Text>
@@ -330,15 +340,15 @@ export default function ClientDetailScreen() {
             {a.staff && <Text style={styles.apptCardStaff}>{a.staff.name}</Text>}
             {a.payment && <Text style={styles.apptCardPayment}>💰 ${a.payment.totalAmount}</Text>}
             {a.notes && <Text style={styles.apptCardNotes}>📝 {a.notes}</Text>}
-          </Pressable>
+          </PressableMotion>
         ))}
-      </View>
+      </Stagger>
     );
   }
 
   function renderLaser() {
     return (
-      <View style={styles.tabContent}>
+      <Stagger style={styles.tabContent}>
         {(role === "ADMIN" || role === "OWNER") && (
           <View style={styles.card}>
             <LaserBodyMap
@@ -362,8 +372,10 @@ export default function ClientDetailScreen() {
                   {packageCatalog.map((pkg: any) => {
                     const selected = selectedPackageTemplateId === pkg.id;
                     return (
-                      <Pressable
+                      <PressableMotion
                         key={pkg.id}
+                        gesto="sutil"
+                        accessibilityState={{ selected }}
                         style={[styles.packageCatalogItem, selected && styles.packageCatalogItemSelected]}
                         onPress={() => setSelectedPackageTemplateId((prev) => prev === pkg.id ? "" : pkg.id)}
                       >
@@ -372,11 +384,12 @@ export default function ClientDetailScreen() {
                           <Text style={styles.packageCatalogMeta}>{pkg.totalSessions} sesiones · ${pkg.price}</Text>
                         </View>
                         {selected && <Ionicons name="checkmark-circle" size={20} color={Colors.secondary} />}
-                      </Pressable>
+                      </PressableMotion>
                     );
                   })}
                 </View>
-                <Pressable
+                <PressableMotion
+                  gesto="elevar"
                   style={[styles.linkPackageBtn, (!selectedPackageTemplateId || linkPackageMutation.isPending) && { opacity: 0.5 }]}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -389,7 +402,7 @@ export default function ClientDetailScreen() {
                   ) : (
                     <Text style={styles.linkPackageBtnText}>Vincular paquete al cliente</Text>
                   )}
-                </Pressable>
+                </PressableMotion>
               </>
             )}
           </View>
@@ -442,7 +455,7 @@ export default function ClientDetailScreen() {
             <Text style={styles.emptyTitle}>Sin sesiones láser</Text>
           </View>
         ) : laserAppts.map((a: any) => (
-          <Pressable key={a.id} style={[styles.card, { padding: 14 }]} onPress={() => router.push(`/appointment/${a.id}`)}>
+          <PressableMotion key={a.id} gesto="elevar" style={[styles.card, { padding: 14 }]} onPress={() => router.push(`/appointment/${a.id}`)}>
             <View style={styles.apptCardHeader}>
               <View>
                 <Text style={styles.apptCardDate}>{formatDate(a.dateTimeStart)}</Text>
@@ -457,9 +470,9 @@ export default function ClientDetailScreen() {
             )}
             {a.staff && <Text style={styles.apptCardStaff}>{a.staff.name}</Text>}
             {a.notes && <Text style={styles.apptCardNotes}>📝 {a.notes}</Text>}
-          </Pressable>
+          </PressableMotion>
         ))}
-      </View>
+      </Stagger>
     );
   }
 
@@ -467,12 +480,13 @@ export default function ClientDetailScreen() {
     const clin = clinical || clinicalData;
     if (!clin && !clinicalEditing) {
       return (
-        <View style={styles.tabContent}>
+        <Stagger style={styles.tabContent}>
           <View style={styles.emptyState}>
             <Ionicons name="document-text-outline" size={40} color={Colors.textMuted} />
             <Text style={styles.emptyTitle}>Sin historia clínica</Text>
           </View>
-          <Pressable
+          <PressableMotion
+            gesto="elevar"
             style={styles.newApptBtn}
             onPress={() => {
               setClinical({ allergiesFlag: false, conditionsJson: Object.fromEntries(CONDITIONS_LIST.map((c) => [c.key, false])), phototype: null });
@@ -481,8 +495,8 @@ export default function ClientDetailScreen() {
           >
             <Ionicons name="add" size={20} color="#fff" />
             <Text style={styles.newApptBtnText}>Crear historia clínica</Text>
-          </Pressable>
-        </View>
+          </PressableMotion>
+        </Stagger>
       );
     }
 
@@ -490,13 +504,18 @@ export default function ClientDetailScreen() {
 
     if (!clinicalEditing) {
       return (
-        <View style={styles.tabContent}>
+        <Stagger style={styles.tabContent}>
           <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
               <Text style={styles.cardTitle}>Historia clínica</Text>
-              <Pressable onPress={() => setClinicalEditing(true)} style={styles.editIconBtn}>
+              <PressableMotion
+                gesto="escala"
+                accessibilityLabel="Editar historia clínica"
+                onPress={() => setClinicalEditing(true)}
+                style={styles.editIconBtn}
+              >
                 <Ionicons name="pencil-outline" size={18} color={Colors.primary} />
-              </Pressable>
+              </PressableMotion>
             </View>
             {clin.phototype && (
               <View style={styles.phototypeDisplay}>
@@ -527,7 +546,7 @@ export default function ClientDetailScreen() {
               </>
             )}
           </View>
-        </View>
+        </Stagger>
       );
     }
 
@@ -537,14 +556,16 @@ export default function ClientDetailScreen() {
           <Text style={styles.cardTitle}>Fototipo de piel</Text>
           <View style={styles.phototypeGrid}>
             {PHOTOTYPES.map((pt) => (
-              <Pressable
+              <PressableMotion
                 key={pt.num}
+                gesto="sutil"
+                accessibilityState={{ selected: clin?.phototype === pt.num }}
                 style={[styles.phototypeCard, clin?.phototype === pt.num && styles.phototypeCardSelected]}
                 onPress={() => setClinical((prev: any) => ({ ...prev, phototype: pt.num }))}
               >
                 <View style={[styles.phototypeCardCircle, { backgroundColor: pt.skin }]} />
                 <Text style={styles.phototypeCardNum}>Tipo {pt.num}</Text>
-              </Pressable>
+              </PressableMotion>
             ))}
           </View>
         </View>
@@ -607,16 +628,17 @@ export default function ClientDetailScreen() {
         </View>
 
         <View style={styles.editBtns}>
-          <Pressable style={styles.cancelEditBtn} onPress={() => { setClinical(clinicalData); setClinicalEditing(false); }}>
+          <PressableMotion gesto="sutil" accessibilityLabel="Cancelar" style={styles.cancelEditBtn} onPress={() => { setClinical(clinicalData); setClinicalEditing(false); }}>
             <Text style={styles.cancelEditBtnText}>Cancelar</Text>
-          </Pressable>
-          <Pressable
+          </PressableMotion>
+          <PressableMotion
+            gesto="elevar"
             style={[styles.saveEditBtn, saveClinicalMutation.isPending && { opacity: 0.5 }]}
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); saveClinicalMutation.mutate(); }}
             disabled={saveClinicalMutation.isPending}
           >
             {saveClinicalMutation.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveEditBtnText}>Guardar</Text>}
-          </Pressable>
+          </PressableMotion>
         </View>
         <View style={{ height: 80 }} />
       </ScrollView>
@@ -624,61 +646,64 @@ export default function ClientDetailScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/clients"))} hitSlop={12}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </Pressable>
-        <View style={styles.headerAvatar}>
-          <Text style={styles.avatarText}>{initials}</Text>
+    <Screen
+      title={client?.fullName}
+      subtitle={client?.phone}
+      hasTabBar={false}
+      onBack={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/clients"))}
+      action={
+        <View style={styles.avatar}>
+          <Text style={styles.avatarTexto}>{initials}</Text>
         </View>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <View style={styles.clientHeader}>
-        <Text style={styles.clientName}>{client?.fullName}</Text>
-        <Text style={styles.clientPhone}>{client?.phone}</Text>
-      </View>
-
-      <View style={styles.tabs}>
-        {(availableTabs as readonly string[]).map((tab) => (
-          <Pressable
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => { Haptics.selectionAsync(); setActiveTab(tab as Tab); }}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        {activeTab === "Resumen" && renderResumen()}
-        {activeTab === "Faciales" && renderFaciales()}
-        {activeTab === "Láser" && renderLaser()}
-        {activeTab === "Clínica" && renderClinica()}
-        <View style={{ height: 100 }} />
-      </ScrollView>
-    </View>
+      }
+      below={
+        /* Las pestañas de la ficha son el segmentado del sistema: el bloque activo
+           se desliza de una a otra en vez de encenderse y apagarse. */
+        <GlassSegmented
+          options={(availableTabs as readonly string[]).map((t) => ({ value: t, label: t }))}
+          value={activeTab}
+          onChange={(t) => {
+            Haptics.selectionAsync();
+            setActiveTab(t as Tab);
+          }}
+        />
+      }
+    >
+      <ScreenScroll>
+        {/* La clave de la pestaña relanza la entrada al cambiar de una a otra: el
+            contenedor no se destruye solo, hay que recrearlo. */}
+        <View key={activeTab}>
+          {activeTab === "Resumen" && renderResumen()}
+          {activeTab === "Faciales" && renderFaciales()}
+          {activeTab === "Láser" && renderLaser()}
+          {activeTab === "Clínica" && renderClinica()}
+        </View>
+      </ScreenScroll>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
   center: { justifyContent: "center", alignItems: "center", flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 8 },
-  headerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primaryLight, justifyContent: "center", alignItems: "center" },
-  avatarText: { fontFamily: "Nunito_700Bold", fontSize: 16, color: Colors.primaryDark },
-  clientHeader: { alignItems: "center", paddingBottom: 16, gap: 4 },
-  clientName: { fontFamily: "Nunito_800ExtraBold", fontSize: 22, color: Colors.text },
-  clientPhone: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary },
-  tabs: { flexDirection: "row", paddingHorizontal: 16, marginBottom: 8, gap: 4 },
-  tab: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 10 },
-  tabActive: { backgroundColor: Colors.primaryLight },
-  tabText: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textMuted },
-  tabTextActive: { color: Colors.primaryDark },
-  tabContent: { paddingHorizontal: 16, gap: 12 },
-  card: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 8, borderWidth: 1, borderColor: Colors.border },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarTexto: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.primaryDark },
+  tabContent: { gap: Space.md },
+  // La tarjeta ya no es blanca sobre blanco: es vidrio, como en el resto de la app.
+  card: {
+    backgroundColor: Colors.glass.fill,
+    borderRadius: Radius.card,
+    padding: Space.lg,
+    gap: Space.sm,
+    borderWidth: 1,
+    borderColor: Colors.glass.stroke,
+  },
   cardTitle: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.text },
   cardHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   editIconBtn: { padding: 4 },

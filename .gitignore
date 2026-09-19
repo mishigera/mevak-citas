@@ -49,3 +49,6 @@ coverage/
 
 # estado local del despliegue
 .deploy/
+
+# capturas de Playwright (antes/después del rediseño)
+.playwright-mcp/

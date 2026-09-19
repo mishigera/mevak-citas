@@ -1,10 +1,14 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
+import { Radius, Space } from "@/constants/theme";
+import { Screen, ScreenScroll } from "@/components/Screen";
+import { GlassCard, GlassIconButton, GlassSurface } from "@/components/glass";
+import { Stagger } from "@/components/motion";
+import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import { getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 
@@ -13,7 +17,6 @@ function monthName(month: number) {
 }
 
 export default function ReportsScreen() {
-  const insets = useSafeAreaInsets();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -38,86 +41,104 @@ export default function ReportsScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} hitSlop={12}>
-          <Ionicons name="close" size={24} color={Colors.text} />
-        </Pressable>
-        <Text style={styles.title}>Reporte de ingresos</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <View style={styles.monthNav}>
-        <Pressable onPress={prevMonth} hitSlop={16}>
-          <Ionicons name="chevron-back" size={24} color={Colors.text} />
-        </Pressable>
-        <Text style={styles.monthLabel}>{monthName(month)} {year}</Text>
-        <Pressable onPress={nextMonth} hitSlop={16}>
-          <Ionicons name="chevron-forward" size={24} color={Colors.text} />
-        </Pressable>
-      </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+    <Screen
+      title="Reporte de ingresos"
+      hasTabBar={false}
+      backIcon="close"
+      onBack={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))}
+      below={
+        <GlassSurface radius={Radius.control} style={styles.navMes}>
+          <GlassIconButton name="chevron-back" diameter={36} size={20} accessibilityLabel="Mes anterior" onPress={prevMonth} />
+          <Text style={styles.mesEtiqueta}>
+            {monthName(month)} {year}
+          </Text>
+          <GlassIconButton name="chevron-forward" diameter={36} size={20} accessibilityLabel="Mes siguiente" onPress={nextMonth} />
+        </GlassSurface>
+      }
+    >
+      <ScreenScroll contentStyle={styles.columna}>
         {isLoading ? (
-          <View style={styles.center}><ActivityIndicator color={Colors.primary} size="large" /></View>
+          <CargandoLista filas={2} />
         ) : (
-          <>
-            <View style={styles.mainCard}>
-              <Text style={styles.mainCardLabel}>Ingreso total</Text>
-              <Text style={styles.mainCardAmount}>${data?.total || 0}</Text>
-              <Text style={styles.mainCardCount}>{data?.count || 0} pagos registrados</Text>
+          /* La clave del mes hace que las cifras vuelvan a entrar al cambiar de mes:
+             el nodo no se destruye solo, hay que recrearlo para relanzar la entrada. */
+          <Stagger key={`${year}-${month}`} style={styles.columna}>
+            <View style={styles.tarjetaPrincipal}>
+              <Text style={styles.principalEtiqueta}>Ingreso total</Text>
+              <Text style={styles.principalCantidad}>${data?.total || 0}</Text>
+              <Text style={styles.principalCuenta}>{data?.count || 0} pagos registrados</Text>
             </View>
 
-            <View style={styles.splitRow}>
-              <View style={[styles.splitCard, { borderColor: Colors.primary + "40" }]}>
-                <View style={[styles.splitIcon, { backgroundColor: Colors.primary + "18" }]}>
-                  <Ionicons name="flower-outline" size={22} color={Colors.primary} />
+            <View style={styles.reparto}>
+              <GlassCard radius={Radius.card} style={[styles.repartoTarjeta, { borderColor: Colors.primary + "40" }]}>
+                <View style={styles.repartoInterior}>
+                  <View style={[styles.repartoIcono, { backgroundColor: Colors.primary + "18" }]}>
+                    <Ionicons name="flower-outline" size={22} color={Colors.primary} />
+                  </View>
+                  <Text style={styles.repartoEtiqueta}>Owner / Laserista</Text>
+                  <Text style={[styles.repartoCantidad, { color: Colors.primary }]}>${data?.ownerNet || 0}</Text>
                 </View>
-                <Text style={styles.splitLabel}>Owner / Laserista</Text>
-                <Text style={[styles.splitAmount, { color: Colors.primary }]}>${data?.ownerNet || 0}</Text>
-              </View>
-              <View style={[styles.splitCard, { borderColor: Colors.accent + "40" }]}>
-                <View style={[styles.splitIcon, { backgroundColor: Colors.accent + "18" }]}>
-                  <Ionicons name="sparkles-outline" size={22} color={Colors.accent} />
+              </GlassCard>
+              <GlassCard radius={Radius.card} style={[styles.repartoTarjeta, { borderColor: Colors.accent + "40" }]}>
+                <View style={styles.repartoInterior}>
+                  <View style={[styles.repartoIcono, { backgroundColor: Colors.accent + "18" }]}>
+                    <Ionicons name="sparkles-outline" size={22} color={Colors.accent} />
+                  </View>
+                  <Text style={styles.repartoEtiqueta}>Facialistas</Text>
+                  <Text style={[styles.repartoCantidad, { color: Colors.accent }]}>${data?.facialistNet || 0}</Text>
                 </View>
-                <Text style={styles.splitLabel}>Facialistas</Text>
-                <Text style={[styles.splitAmount, { color: Colors.accent }]}>${data?.facialistNet || 0}</Text>
-              </View>
+              </GlassCard>
             </View>
 
             {(!data || data.count === 0) && (
-              <View style={styles.empty}>
-                <Ionicons name="bar-chart-outline" size={48} color={Colors.textMuted} />
-                <Text style={styles.emptyTitle}>Sin datos</Text>
-                <Text style={styles.emptyText}>No hay pagos registrados en {monthName(month)} {year}</Text>
-              </View>
+              <EstadoVacio
+                icono="bar-chart-outline"
+                titulo="Sin datos"
+                texto={`No hay pagos registrados en ${monthName(month)} ${year}`}
+              />
             )}
-          </>
+          </Stagger>
         )}
-        <View style={{ height: 60 }} />
-      </ScrollView>
-    </View>
+      </ScreenScroll>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 },
-  title: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
-  monthNav: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 24, marginBottom: 20 },
-  monthLabel: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text, textTransform: "capitalize", minWidth: 160, textAlign: "center" },
-  content: { flex: 1, paddingHorizontal: 16 },
-  mainCard: { backgroundColor: Colors.primary, borderRadius: 20, padding: 24, marginBottom: 16, alignItems: "center", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 6 },
-  mainCardLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: "rgba(255,255,255,0.8)" },
-  mainCardAmount: { fontFamily: "Nunito_800ExtraBold", fontSize: 48, color: "#fff", marginVertical: 4 },
-  mainCardCount: { fontFamily: "Nunito_400Regular", fontSize: 13, color: "rgba(255,255,255,0.7)" },
-  splitRow: { flexDirection: "row", gap: 12, marginBottom: 20 },
-  splitCard: { flex: 1, backgroundColor: "#fff", borderRadius: 16, padding: 16, alignItems: "center", gap: 8, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
-  splitIcon: { width: 44, height: 44, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  splitLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary, textAlign: "center" },
-  splitAmount: { fontFamily: "Nunito_800ExtraBold", fontSize: 24 },
-  center: { justifyContent: "center", alignItems: "center", paddingVertical: 60 },
-  empty: { alignItems: "center", paddingVertical: 40, gap: 8 },
-  emptyTitle: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
-  emptyText: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary, textAlign: "center" },
+  columna: { gap: Space.lg },
+  navMes: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Space.sm,
+    paddingVertical: Space.sm,
+  },
+  mesEtiqueta: {
+    flex: 1,
+    fontFamily: "Nunito_700Bold",
+    fontSize: 16,
+    color: Colors.text,
+    textTransform: "capitalize",
+    textAlign: "center",
+  },
+  tarjetaPrincipal: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.panel,
+    padding: Space.xl,
+    alignItems: "center",
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  principalEtiqueta: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: "rgba(255,255,255,0.8)" },
+  principalCantidad: { fontFamily: "Nunito_800ExtraBold", fontSize: 48, color: "#fff", marginVertical: 4 },
+  principalCuenta: { fontFamily: "Nunito_400Regular", fontSize: 13, color: "rgba(255,255,255,0.7)" },
+  reparto: { flexDirection: "row", gap: Space.md },
+  repartoTarjeta: { flex: 1 },
+  repartoInterior: { padding: Space.lg, alignItems: "center", gap: Space.sm },
+  repartoIcono: { width: 44, height: 44, borderRadius: Radius.tile, justifyContent: "center", alignItems: "center" },
+  repartoEtiqueta: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary, textAlign: "center" },
+  repartoCantidad: { fontFamily: "Nunito_800ExtraBold", fontSize: 24 },
 });

@@ -6,11 +6,23 @@
  */
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, fireEvent, type RenderOptions } from "@testing-library/react-native";
+import { configure, render, screen, fireEvent, type RenderOptions } from "@testing-library/react-native";
 import { fetch as expoFetch } from "expo/fetch";
 import { useLocalSearchParams, router } from "expo-router";
 
 export * from "./auth-mock";
+
+/**
+ * Las pantallas ahora animan de verdad (entradas escalonadas, paneles que crecen desde
+ * un botón), y con diecisiete archivos en paralelo el segundo por defecto de `waitFor`
+ * se queda corto en una máquina cargada: los tests empiezan a fallar por reloj y no por
+ * código. Cinco segundos no ralentizan nada —`waitFor` sale en cuanto la condición se
+ * cumple— y quitan de en medio esa intermitencia.
+ *
+ * Va aquí y no en `app-setup.ts` porque ese fichero es `setupFiles`, se ejecuta antes
+ * de que exista `expect`, y cargar la librería de testing allí revienta la suite entera.
+ */
+configure({ asyncUtilTimeout: 5000 });
 
 const mockFetch = expoFetch as unknown as jest.Mock;
 
@@ -25,6 +37,36 @@ export const mockRouter = router as unknown as {
 export function setRouteParams(params: Record<string, string>) {
   (useLocalSearchParams as unknown as jest.Mock).mockReturnValue(params);
 }
+
+/**
+ * Anchos de referencia. `movil` es el que se aplica por defecto: las pantallas se
+ * escribieron contra el layout compacto y ahi deben seguir comprobandose.
+ */
+export const VIEWPORTS = {
+  movil: { width: 390, height: 844 },
+  ipadVertical: { width: 820, height: 1180 },
+  ipadApaisado: { width: 1024, height: 768 },
+} as const;
+
+type Viewport = { width: number; height: number };
+
+function viewportGlobal() {
+  return globalThis as { __mockViewport?: Viewport };
+}
+
+/**
+ * Cambia el ancho que vera la pantalla (`useBreakpoint`). Se revierte a movil al
+ * terminar cada test, así que solo afecta al test que lo llama.
+ *
+ *   setViewport(VIEWPORTS.ipadApaisado);
+ */
+export function setViewport(v: Viewport) {
+  viewportGlobal().__mockViewport = { ...v };
+}
+
+afterEach(() => {
+  setViewport(VIEWPORTS.movil);
+});
 
 type Respuesta = unknown | ((body: unknown) => unknown);
 type Rutas = Record<string, Respuesta>;

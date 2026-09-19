@@ -109,8 +109,11 @@ describe("selector de cliente", () => {
 
     await elegirCliente("Ana Gómez");
 
-    expect(screen.getByText("Ana Gómez")).toBeTruthy();
-    expect(screen.queryByPlaceholderText("Buscar...")).toBeNull();
+    // El panel no desaparece de golpe: colapsa hacia el botón que lo abrió, así que
+    // durante unas décimas el nombre está dos veces (en la lista que se cierra y en
+    // la fila) y el buscador sigue montado.
+    await waitFor(() => expect(screen.getAllByText("Ana Gómez")).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByPlaceholderText("Buscar...")).toBeNull());
     expect(screen.getByText("Crear cita")).toBeTruthy();
   });
 
@@ -119,7 +122,8 @@ describe("selector de cliente", () => {
     fireEvent.press(screen.getByText("Seleccionar cliente"));
     await waitFor(() => expect(screen.getByText("María López")).toBeTruthy());
 
-    pressIcon("arrow-back");
+    // El panel se cierra por su propio botón, no por una flecha de cabecera.
+    fireEvent.press(screen.getByLabelText("Cerrar"));
 
     expect(screen.getByText("Seleccionar cliente")).toBeTruthy();
   });
@@ -141,7 +145,8 @@ describe("selector de staff", () => {
 
     await elegirStaff("Lucía");
 
-    expect(screen.getByText("Lucía")).toBeTruthy();
+    // Ver el comentario del selector de cliente: el panel tarda en colapsar.
+    await waitFor(() => expect(screen.getAllByText("Lucía")).toHaveLength(1));
     expect(screen.getByText("Crear cita")).toBeTruthy();
   });
 });

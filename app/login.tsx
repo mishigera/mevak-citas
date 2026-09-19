@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TextInput,
-  Pressable,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -14,10 +13,13 @@ import {
 } from "react-native";
 import { Redirect, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/auth";
 import { Colors } from "@/constants/colors";
+import { Blur, GlassShadow, Radius, Space } from "@/constants/theme";
+import { GlassSurface } from "@/components/glass";
+import { AmbientBackground } from "@/components/AmbientBackground";
+import { Entrar, PressableMotion, Stagger } from "@/components/motion";
 import * as Haptics from "expo-haptics";
 
 export default function LoginScreen() {
@@ -53,25 +55,37 @@ export default function LoginScreen() {
   };
 
   return (
-    <LinearGradient colors={["#FFFFFF", "#FFFFFF", "#FFFFFF"]} style={styles.gradient}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-        <ScrollView
-          contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 }]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.logoContainer}>
-            <View style={styles.logoCircle}>
-              <Image source={require("../assets/images/mevak-logo-small.png")} style={styles.logoImage} resizeMode="contain" />
-            </View>
+    // Antes había aquí un LinearGradient de blanco a blanco a blanco.
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.contenedor}>
+      <AmbientBackground />
+      <ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingTop: insets.top + Space.xxl, paddingBottom: insets.bottom + Space.xl },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Columna con tope de ancho: en iPad el formulario se queda centrado y del
+            tamaño de un formulario, no estirado a lo ancho de la pantalla. */}
+        {/* La entrada se escalona: logo, tarjeta y pie, uno detrás de otro. */}
+        <Stagger style={styles.columna}>
+          <Entrar style={styles.logoContainer}>
+            <GlassSurface tone="strong" intensity={Blur.panel} radius={40} style={styles.logoCircle}>
+              <Image
+                source={require("../assets/images/mevak-logo-small.png")}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </GlassSurface>
             <Text style={styles.brandName}>Mevak Beauty Center</Text>
             <Text style={styles.brandSub}>Sistema de gestión</Text>
-          </View>
+          </Entrar>
 
-          <View style={styles.card}>
+          <GlassSurface tone="neutral" intensity={Blur.panel} radius={Radius.panel} elevation="lifted" style={styles.card}>
             <Text style={styles.cardTitle}>Iniciar sesión</Text>
 
-            <View style={styles.inputWrapper}>
+            <GlassSurface tone="soft" intensity={Blur.control} radius={Radius.control} elevation="none" style={styles.inputWrapper}>
               <Ionicons name="mail-outline" size={20} color={Colors.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
@@ -83,9 +97,9 @@ export default function LoginScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-            </View>
+            </GlassSurface>
 
-            <View style={styles.inputWrapper}>
+            <GlassSurface tone="soft" intensity={Blur.control} radius={Radius.control} elevation="none" style={styles.inputWrapper}>
               <Ionicons name="lock-closed-outline" size={20} color={Colors.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={[styles.input, { flex: 1 }]}
@@ -97,13 +111,22 @@ export default function LoginScreen() {
                 returnKeyType="done"
                 onSubmitEditing={handleLogin}
               />
-              <Pressable onPress={() => setShowPass((v) => !v)} hitSlop={8}>
+              <PressableMotion
+                gesto="escala"
+                accessibilityLabel={showPass ? "Ocultar contraseña" : "Mostrar contraseña"}
+                onPress={() => setShowPass((v) => !v)}
+                hitSlop={8}
+              >
                 <Ionicons name={showPass ? "eye-off-outline" : "eye-outline"} size={20} color={Colors.textMuted} />
-              </Pressable>
-            </View>
+              </PressableMotion>
+            </GlassSurface>
 
-            <Pressable
-              style={({ pressed }) => [styles.loginBtn, pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] }]}
+            {/* La accion principal se queda en rosa solido: si también fuera de vidrio
+                se perderia cual es el botón que importa. */}
+            <PressableMotion
+              gesto="elevar"
+              accessibilityLabel="Entrar"
+              style={styles.loginBtn}
               onPress={handleLogin}
               disabled={loading}
             >
@@ -112,84 +135,53 @@ export default function LoginScreen() {
               ) : (
                 <Text style={styles.loginBtnText}>Entrar</Text>
               )}
-            </Pressable>
-          </View>
+            </PressableMotion>
+          </GlassSurface>
 
           <View style={styles.hints}>
             <Text style={styles.hintTitle}>Acceso restringido para personal autorizado.</Text>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </LinearGradient>
+        </Stagger>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: { flex: 1 },
-  scroll: { paddingHorizontal: 24, flexGrow: 1 },
-  logoContainer: { alignItems: "center", marginBottom: 32 },
+  contenedor: { flex: 1 },
+  scroll: { paddingHorizontal: Space.xl, flexGrow: 1, justifyContent: "center" },
+  columna: { width: "100%", maxWidth: 440, alignSelf: "center" },
+  logoContainer: { alignItems: "center", marginBottom: Space.xxl },
   logoCircle: {
     width: 80,
     height: 80,
-    borderRadius: 40,
-    backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 6,
-    marginBottom: 16,
+    marginBottom: Space.lg,
   },
-  logoImage: {
-    width: 62,
-    height: 62,
-  },
-  brandName: { fontFamily: "Nunito_800ExtraBold", fontSize: 28, color: Colors.text },
+  logoImage: { width: 62, height: 62 },
+  brandName: { fontFamily: "Nunito_800ExtraBold", fontSize: 28, color: Colors.text, textAlign: "center" },
   brandSub: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary, marginTop: 4 },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 24,
-    padding: 24,
-    gap: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 24,
-    elevation: 4,
-  },
-  cardTitle: { fontFamily: "Nunito_700Bold", fontSize: 20, color: Colors.text, marginBottom: 4 },
+  card: { padding: Space.xl, gap: Space.lg },
+  cardTitle: { fontFamily: "Nunito_700Bold", fontSize: 20, color: Colors.text, marginBottom: Space.xs },
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: Colors.background,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    paddingHorizontal: Space.lg,
+    paddingVertical: Space.lg - 2,
   },
   inputIcon: { marginRight: 10 },
-  input: {
-    flex: 1,
-    fontFamily: "Nunito_400Regular",
-    fontSize: 16,
-    color: Colors.text,
-  },
+  input: { flex: 1, fontFamily: "Nunito_400Regular", fontSize: 16, color: Colors.text },
   loginBtn: {
     backgroundColor: Colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: Radius.control,
+    paddingVertical: Space.lg,
     alignItems: "center",
-    marginTop: 4,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    marginTop: Space.xs,
+    ...GlassShadow,
+    shadowOpacity: 0.28,
   },
   loginBtnText: { fontFamily: "Nunito_700Bold", fontSize: 16, color: "#fff" },
-  hints: { marginTop: 24, gap: 8 },
-  hintTitle: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary, marginBottom: 4 },
+  hints: { marginTop: Space.xl, alignItems: "center" },
+  hintTitle: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary, textAlign: "center" },
 });

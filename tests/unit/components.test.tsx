@@ -1,7 +1,8 @@
 import React from "react";
 import { Text, View } from "react-native";
-import { render, screen, fireEvent } from "@testing-library/react-native";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react-native";
 import { Rect, Ellipse } from "react-native-svg";
+import { Motion } from "@/constants/motion";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ErrorFallback } from "@/components/ErrorFallback";
 import { LaserBodyMap } from "@/components/LaserBodyMap";
@@ -111,42 +112,81 @@ describe("ErrorFallback", () => {
     stack: "Error: Falló la petición\n    at algo.tsx:1:1",
   });
 
-  it("renderiza sin romperse", () => {
+  it("habla español y no enseña el mensaje crudo del error", () => {
     render(<ErrorFallback error={error} resetError={jest.fn()} />);
-    expect(screen.toJSON()).toBeTruthy();
+
+    expect(screen.getByText("Algo se ha roto")).toBeTruthy();
+    // El mensaje técnico vive en el panel de detalle, no en la pantalla.
+    expect(screen.queryByText(/Falló la petición/)).toBeNull();
   });
 
-  it("ofrece reiniciar la app", () => {
+  it("ofrece volver a cargar la app", async () => {
+    const { reloadAppAsync } = jest.requireMock("expo");
     render(<ErrorFallback error={error} resetError={jest.fn()} />);
-    expect(screen.UNSAFE_root).toBeTruthy();
+
+    fireEvent.press(screen.getByText("Volver a cargar"));
+
+    await waitFor(() => expect(reloadAppAsync).toHaveBeenCalled());
   });
 
-  it("en desarrollo deja ver el detalle del error", () => {
+  it("si ni recargar funciona, al menos reintenta el render", async () => {
+    const { reloadAppAsync } = jest.requireMock("expo");
+    reloadAppAsync.mockRejectedValueOnce(new Error("no se pudo"));
+    const resetError = jest.fn();
+
+    render(<ErrorFallback error={error} resetError={resetError} />);
+    fireEvent.press(screen.getByText("Volver a cargar"));
+
+    await waitFor(() => expect(resetError).toHaveBeenCalled());
+  });
+
+  it("en desarrollo deja ver el detalle en un panel de vidrio, no en un modal", () => {
     render(<ErrorFallback error={error} resetError={jest.fn()} />);
 
-    const verDetalle = screen.queryByLabelText("View error details");
-    if (!verDetalle) return; // __DEV__ apagado: la rama no aplica
+    fireEvent.press(screen.getByLabelText("Ver detalle del error"));
 
-    fireEvent.press(verDetalle);
+    expect(screen.getByTestId("panel-error")).toBeTruthy();
     expect(screen.getByText(/Falló la petición/)).toBeTruthy();
+    expect(screen.getByText(/algo\.tsx/)).toBeTruthy();
   });
 
   it("el detalle se puede cerrar", () => {
-    render(<ErrorFallback error={error} resetError={jest.fn()} />);
+    // Relojes falsos: el panel tarda `Motion.panelCerrar` en desmontarse y con relojes
+    // de verdad esa espera es intermitente bajo carga. Ver `popover.test.tsx`.
+    jest.useFakeTimers();
+    try {
+      render(<ErrorFallback error={error} resetError={jest.fn()} />);
 
-    const verDetalle = screen.queryByLabelText("View error details");
-    if (!verDetalle) return;
+      fireEvent.press(screen.getByLabelText("Ver detalle del error"));
+      act(() => jest.advanceTimersByTime(32));
 
-    fireEvent.press(verDetalle);
-    fireEvent.press(screen.getByLabelText("Close error details"));
-    expect(screen.queryByLabelText("Close error details")).toBeNull();
+      fireEvent.press(screen.getByLabelText("Cerrar"));
+      act(() => jest.advanceTimersByTime(Motion.panelCerrar + 32));
+
+      expect(screen.queryByTestId("panel-error")).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
-  it("aguanta un error sin stack", () => {
+  it("aguanta un error sin stack: enseña el mensaje y nada más", () => {
     const pelado = new Error("Sin stack");
     pelado.stack = undefined;
 
-    expect(() => render(<ErrorFallback error={pelado} resetError={jest.fn()} />)).not.toThrow();
+    render(<ErrorFallback error={pelado} resetError={jest.fn()} />);
+    fireEvent.press(screen.getByLabelText("Ver detalle del error"));
+
+    expect(screen.getByText("Sin stack")).toBeTruthy();
+  });
+
+  it("se monta aunque no haya router del que leer la ruta", () => {
+    const { usePathname } = jest.requireMock("expo-router");
+    usePathname.mockImplementationOnce(() => {
+      throw new Error("fuera del contexto del router");
+    });
+
+    expect(() => render(<ErrorFallback error={error} resetError={jest.fn()} />)).not.toThrow();
+    expect(screen.getByText("Algo se ha roto")).toBeTruthy();
   });
 });
 

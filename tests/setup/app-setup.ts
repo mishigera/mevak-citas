@@ -17,6 +17,21 @@ jest.mock("expo/fetch", () => {
   return { fetch: g.__mockExpoFetch };
 });
 
+// Ancho de la ventana. Jest arranca con 750x1334, que con los breakpoints de
+// `lib/responsive` cae en "medium": sin esto, los tests de pantalla renderizarían el
+// layout de iPad en vez del de celular contra el que se escribieron.
+// Se ancla a globalThis para sobrevivir a `jest.resetModules()`; el harness lo
+// devuelve a 390x844 después de cada test.
+jest.mock("@/lib/responsive", () => {
+  const real = jest.requireActual("@/lib/responsive");
+  const g = globalThis as { __mockViewport?: { width: number; height: number } };
+  g.__mockViewport ??= { width: 390, height: 844 };
+  return {
+    ...real,
+    useBreakpoint: () => real.layoutFor(g.__mockViewport!.width, g.__mockViewport!.height),
+  };
+});
+
 // Fuentes: que se consideren cargadas al instante.
 jest.mock("expo-font", () => ({
   useFonts: () => [true, null],

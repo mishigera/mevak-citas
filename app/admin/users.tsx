@@ -1,10 +1,15 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, TextInput } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, StyleSheet, Alert } from "react-native";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
+import { Radius, Space } from "@/constants/theme";
+import { Screen, ScreenScroll } from "@/components/Screen";
+import { GlassCard, GlassIconButton } from "@/components/glass";
+import { Entrar, PressableMotion, Stagger } from "@/components/motion";
+import { BotonPrimario, CampoTexto, PanelFormulario } from "@/components/Formulario";
+import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
@@ -14,7 +19,6 @@ const ROLE_LABELS: Record<string, string> = { ADMIN: "Admin", OWNER: "Owner/Lase
 const ROLE_COLORS: Record<string, string> = { ADMIN: Colors.error, OWNER: Colors.primary, RECEPTION: Colors.secondary, FACIALIST: Colors.accent };
 
 export default function UsersScreen() {
-  const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
@@ -69,156 +73,201 @@ export default function UsersScreen() {
   });
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} hitSlop={12}>
-          <Ionicons name="close" size={24} color={Colors.text} />
-        </Pressable>
-        <Text style={styles.title}>Usuarios</Text>
-        <Pressable onPress={() => setShowForm((v) => !v)} hitSlop={12}>
-          <Ionicons name={showForm ? "remove" : "add"} size={24} color={Colors.primary} />
-        </Pressable>
-      </View>
+    <Screen
+      title="Usuarios"
+      hasTabBar={false}
+      backIcon="close"
+      onBack={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))}
+      action={
+        <GlassIconButton
+          name={showForm ? "remove" : "add"}
+          variant="primary"
+          accessibilityLabel={showForm ? "Cerrar formulario" : "Nuevo usuario"}
+          onPress={() => setShowForm((v) => !v)}
+        />
+      }
+    >
+      <ScreenScroll contentStyle={styles.columna}>
+        {showForm && (
+          <PanelFormulario titulo="Nuevo usuario">
+            <CampoTexto value={name} onChangeText={setName} placeholder="Nombre completo" />
+            <CampoTexto
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Correo electrónico"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <CampoTexto value={password} onChangeText={setPassword} placeholder="Contraseña" secureTextEntry />
+            <Text style={styles.roleLabel}>Rol</Text>
+            <View style={styles.roleGrid}>
+              {ROLES.map((r) => (
+                <PressableMotion
+                  key={r}
+                  gesto="sutil"
+                  accessibilityLabel={ROLE_LABELS[r]}
+                  accessibilityState={{ selected: role === r }}
+                  style={[
+                    styles.roleBtn,
+                    role === r && { backgroundColor: ROLE_COLORS[r] + "20", borderColor: ROLE_COLORS[r] },
+                  ]}
+                  onPress={() => setRole(r)}
+                >
+                  <Text style={[styles.roleBtnText, role === r && { color: ROLE_COLORS[r] }]}>
+                    {ROLE_LABELS[r]}
+                  </Text>
+                </PressableMotion>
+              ))}
+            </View>
+            <BotonPrimario
+              titulo="Crear usuario"
+              cargando={createMutation.isPending}
+              disabled={!name.trim() || !email.trim() || !password}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                createMutation.mutate();
+              }}
+            />
+          </PanelFormulario>
+        )}
 
-      {showForm && (
-        <View style={styles.form}>
-          <Text style={styles.formTitle}>Nuevo usuario</Text>
-          <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Nombre completo" />
-          <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Correo electrónico" keyboardType="email-address" autoCapitalize="none" />
-          <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder="Contraseña" secureTextEntry />
-          <Text style={styles.roleLabel}>Rol</Text>
-          <View style={styles.roleGrid}>
-            {ROLES.map((r) => (
-              <Pressable key={r} style={[styles.roleBtn, role === r && { backgroundColor: ROLE_COLORS[r] + "20", borderColor: ROLE_COLORS[r] }]} onPress={() => setRole(r)}>
-                <Text style={[styles.roleBtnText, role === r && { color: ROLE_COLORS[r] }]}>{ROLE_LABELS[r]}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Pressable style={styles.saveBtn} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); createMutation.mutate(); }} disabled={!name.trim() || !email.trim() || !password || createMutation.isPending}>
-            {createMutation.isPending ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Crear usuario</Text>}
-          </Pressable>
-        </View>
-      )}
-
-      <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
         {isLoading ? (
-          <View style={styles.center}><ActivityIndicator color={Colors.primary} /></View>
+          <CargandoLista filas={3} />
+        ) : (users || []).length === 0 ? (
+          <EstadoVacio icono="people-outline" titulo="Sin usuarios" texto="Toca + para dar de alta al staff" />
         ) : (
-          <View style={styles.userList}>
+          <Stagger style={styles.lista}>
             {(users || []).map((u) => {
               const initials = u.name.split(" ").slice(0, 2).map((w: string) => w[0]?.toUpperCase() || "").join("");
               const roleColor = ROLE_COLORS[u.role] || Colors.primary;
               return (
-                <View key={u.id} style={styles.userCard}>
-                  <View style={styles.userMainRow}>
-                    <View style={[styles.userAvatar, { backgroundColor: roleColor + "20" }]}>
-                      <Text style={[styles.userAvatarText, { color: roleColor }]}>{initials}</Text>
-                    </View>
-                    <View style={styles.userInfo}>
-                      <Text style={styles.userName}>{u.name}</Text>
-                      <Text style={styles.userEmail}>{u.email}</Text>
-                      <View style={[styles.rolePill, { backgroundColor: roleColor + "18" }]}> 
-                        <Text style={[styles.rolePillText, { color: roleColor }]}>{ROLE_LABELS[u.role]}</Text>
+                <GlassCard key={u.id} radius={Radius.card}>
+                  <View style={styles.tarjeta}>
+                    <View style={styles.filaPrincipal}>
+                      <View style={[styles.avatar, { backgroundColor: roleColor + "20" }]}>
+                        <Text style={[styles.avatarTexto, { color: roleColor }]}>{initials}</Text>
                       </View>
-                    </View>
-                    <View style={styles.userActions}>
-                      <Pressable
-                        onPress={() => {
-                          if (editingPasswordUserId === u.id) {
-                            setEditingPasswordUserId(null);
-                            setNewPassword("");
-                            return;
-                          }
-                          setEditingPasswordUserId(u.id);
-                          setNewPassword("");
-                        }}
-                        hitSlop={8}
-                      >
-                        <Ionicons name="key-outline" size={22} color={Colors.primary} />
-                      </Pressable>
-                      <Pressable onPress={() => toggleMutation.mutate({ id: u.id, isActive: !u.isActive })} hitSlop={8}>
-                        <Ionicons name={u.isActive ? "checkmark-circle" : "close-circle"} size={24} color={u.isActive ? Colors.success : Colors.error} />
-                      </Pressable>
-                    </View>
-                  </View>
-
-                  {editingPasswordUserId === u.id && (
-                    <View style={styles.passwordEditor}>
-                      <TextInput
-                        style={styles.passwordInput}
-                        value={newPassword}
-                        onChangeText={setNewPassword}
-                        secureTextEntry
-                        placeholder="Nueva contraseña"
-                        placeholderTextColor={Colors.textMuted}
-                      />
-                      <View style={styles.passwordActions}>
-                        <Pressable
-                          style={[styles.passwordBtn, styles.passwordCancelBtn]}
+                      <View style={styles.info}>
+                        <Text style={styles.nombre}>{u.name}</Text>
+                        <Text style={styles.correo}>{u.email}</Text>
+                        <View style={[styles.rolePill, { backgroundColor: roleColor + "18" }]}>
+                          <Text style={[styles.rolePillText, { color: roleColor }]}>{ROLE_LABELS[u.role]}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.acciones}>
+                        <PressableMotion
+                          gesto="escala"
+                          hitSlop={8}
+                          accessibilityLabel="Cambiar contraseña"
                           onPress={() => {
-                            setEditingPasswordUserId(null);
+                            if (editingPasswordUserId === u.id) {
+                              setEditingPasswordUserId(null);
+                              setNewPassword("");
+                              return;
+                            }
+                            setEditingPasswordUserId(u.id);
                             setNewPassword("");
                           }}
                         >
-                          <Text style={styles.passwordCancelText}>Cancelar</Text>
-                        </Pressable>
-                        <Pressable
-                          style={[styles.passwordBtn, styles.passwordSaveBtn, !newPassword.trim() && { opacity: 0.5 }]}
-                          onPress={() => updatePasswordMutation.mutate({ id: u.id, password: newPassword })}
-                          disabled={!newPassword.trim() || updatePasswordMutation.isPending}
+                          <Ionicons name="key-outline" size={22} color={Colors.primary} />
+                        </PressableMotion>
+                        <PressableMotion
+                          gesto="escala"
+                          hitSlop={8}
+                          accessibilityLabel={u.isActive ? "Desactivar usuario" : "Activar usuario"}
+                          onPress={() => toggleMutation.mutate({ id: u.id, isActive: !u.isActive })}
                         >
-                          {updatePasswordMutation.isPending ? (
-                            <ActivityIndicator color="#fff" size="small" />
-                          ) : (
-                            <Text style={styles.passwordSaveText}>Guardar</Text>
-                          )}
-                        </Pressable>
+                          <Ionicons
+                            name={u.isActive ? "checkmark-circle" : "close-circle"}
+                            size={24}
+                            color={u.isActive ? Colors.success : Colors.error}
+                          />
+                        </PressableMotion>
                       </View>
                     </View>
-                  )}
-                </View>
+
+                    {editingPasswordUserId === u.id && (
+                      /* El editor no aparece de golpe: entra como todo lo demás. */
+                      <Entrar style={styles.editorClave}>
+                        <CampoTexto
+                          value={newPassword}
+                          onChangeText={setNewPassword}
+                          secureTextEntry
+                          placeholder="Nueva contraseña"
+                        />
+                        <View style={styles.editorAcciones}>
+                          <PressableMotion
+                            gesto="sutil"
+                            accessibilityLabel="Cancelar"
+                            style={[styles.botonClave, styles.botonCancelar]}
+                            onPress={() => {
+                              setEditingPasswordUserId(null);
+                              setNewPassword("");
+                            }}
+                          >
+                            <Text style={styles.textoCancelar}>Cancelar</Text>
+                          </PressableMotion>
+                          <BotonPrimario
+                            titulo="Guardar"
+                            style={styles.botonClave}
+                            cargando={updatePasswordMutation.isPending}
+                            disabled={!newPassword.trim()}
+                            onPress={() => updatePasswordMutation.mutate({ id: u.id, password: newPassword })}
+                          />
+                        </View>
+                      </Entrar>
+                    )}
+                  </View>
+                </GlassCard>
               );
             })}
-          </View>
+          </Stagger>
         )}
-        <View style={{ height: 60 }} />
-      </ScrollView>
-    </View>
+      </ScreenScroll>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 },
-  title: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
-  form: { backgroundColor: "#fff", marginHorizontal: 16, borderRadius: 16, padding: 16, marginBottom: 16, gap: 10 },
-  formTitle: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.text },
-  input: { backgroundColor: Colors.background, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.text },
+  columna: { gap: Space.lg },
+  lista: { gap: Space.sm },
   roleLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary },
   roleGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  roleBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 2, borderColor: Colors.border },
+  roleBtn: {
+    paddingHorizontal: Space.md,
+    paddingVertical: Space.sm,
+    borderRadius: Radius.tile / 2,
+    borderWidth: 2,
+    borderColor: Colors.glass.strokeSoft,
+  },
   roleBtnText: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary },
-  saveBtn: { backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
-  saveBtnText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: "#fff" },
-  list: { flex: 1, paddingHorizontal: 16 },
-  userList: { gap: 8 },
-  userCard: { backgroundColor: "#fff", borderRadius: 14, padding: 14, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
-  userMainRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  userAvatar: { width: 46, height: 46, borderRadius: 23, justifyContent: "center", alignItems: "center" },
-  userAvatarText: { fontFamily: "Nunito_700Bold", fontSize: 16 },
-  userInfo: { flex: 1, gap: 3 },
-  userActions: { flexDirection: "row", alignItems: "center", gap: 10 },
-  userName: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.text },
-  userEmail: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
-  rolePill: { alignSelf: "flex-start", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+
+  tarjeta: { padding: Space.lg - 2 },
+  filaPrincipal: { flexDirection: "row", alignItems: "center", gap: Space.md },
+  avatar: { width: 46, height: 46, borderRadius: 23, justifyContent: "center", alignItems: "center" },
+  avatarTexto: { fontFamily: "Nunito_700Bold", fontSize: 16 },
+  info: { flex: 1, gap: 3 },
+  acciones: { flexDirection: "row", alignItems: "center", gap: Space.md - 2 },
+  nombre: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.text },
+  correo: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
+  rolePill: { alignSelf: "flex-start", borderRadius: 6, paddingHorizontal: Space.sm, paddingVertical: 2 },
   rolePillText: { fontFamily: "Nunito_700Bold", fontSize: 10 },
-  passwordEditor: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.border, gap: 10 },
-  passwordInput: { backgroundColor: Colors.background, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.text },
-  passwordActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
-  passwordBtn: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, minWidth: 90, alignItems: "center" },
-  passwordCancelBtn: { borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
-  passwordSaveBtn: { backgroundColor: Colors.primary },
-  passwordCancelText: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary },
-  passwordSaveText: { fontFamily: "Nunito_700Bold", fontSize: 13, color: "#fff" },
-  center: { justifyContent: "center", alignItems: "center", paddingVertical: 60 },
+
+  editorClave: {
+    marginTop: Space.md,
+    paddingTop: Space.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.glass.strokeSoft,
+    gap: Space.md - 2,
+  },
+  editorAcciones: { flexDirection: "row", justifyContent: "flex-end", gap: Space.sm },
+  botonClave: { minWidth: 100, paddingHorizontal: Space.lg - 2, paddingVertical: Space.md - 2 },
+  botonCancelar: {
+    borderWidth: 1,
+    borderColor: Colors.glass.strokeSoft,
+    borderRadius: Radius.control,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  textoCancelar: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary },
 });

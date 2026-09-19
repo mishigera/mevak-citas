@@ -19,6 +19,42 @@ const NO_SHOW = "#C95C5C";
 const DONE = "#B8A6A6";
 const CANCELLED = "#C95C5C";
 
+// --- Vidrio -----------------------------------------------------------------
+// Rellenos translúcidos, no opacos: el panel toma el color de lo que tiene detrás.
+// Los rgba salen de los hex de marca de arriba (193,130,151 = PRIMARY).
+const GLASS_FILL = "rgba(255,255,255,0.55)";
+const GLASS_FILL_STRONG = "rgba(255,255,255,0.72)";
+const GLASS_FILL_SOFT = "rgba(255,255,255,0.40)";
+const GLASS_FILL_PINK = "rgba(193,130,151,0.16)";
+const GLASS_FILL_PINK_STRONG = "rgba(193,130,151,0.30)";
+// El filo claro del borde superior: el reflejo especular que hace que se lea como vidrio.
+const GLASS_STROKE = "rgba(255,255,255,0.70)";
+const GLASS_STROKE_SOFT = "rgba(193,130,151,0.18)";
+// Rellenos opacos de respaldo: cuando el navegador no tiene `backdrop-filter` o el
+// usuario pide menos transparencia, el vidrio deja de serlo y pasa a superficie sólida.
+const GLASS_FILL_SOLID = "rgba(251,243,246,0.98)";
+const GLASS_FILL_SOLID_STRONG = "rgba(253,249,250,0.99)";
+// Y el estado activo, que sin translucidez tiene que seguir leyéndose como activo.
+const GLASS_FILL_PINK_SOLID = "#F4E6EB";
+const GLASS_FILL_PINK_SOLID_STRONG = PRIMARY_LIGHT;
+// La sombra como cadena de CSS, para el `box-shadow` que transiciona en hover.
+// Son los mismos 140,84,104 de PRIMARY_DARK.
+const GLASS_SHADOW_CSS = "rgba(140,84,104,0.16)";
+const GLASS_SHADOW_CSS_STRONG = "rgba(140,84,104,0.26)";
+// Esqueleto de carga: barrido claro sobre un gris rosado muy tenue.
+const SKELETON_BASE = "rgba(140,84,104,0.07)";
+const SKELETON_SHINE = "rgba(140,84,104,0.16)";
+
+// --- Fondo ambiental --------------------------------------------------------
+// Sin esto el vidrio no tiene nada que refractar y un panel translúcido sobre
+// blanco es indistinguible de un panel blanco.
+const AMBIENT_TOP = "#FFFFFF";
+const AMBIENT_MID = "#FDF6F8";
+const AMBIENT_BOTTOM = "#F7EAF0";
+const AMBIENT_BLOB_PRIMARY = PRIMARY;
+const AMBIENT_BLOB_SECONDARY = SECONDARY;
+const AMBIENT_BLOB_ACCENT = ACCENT;
+
 export const Colors = {
   primary: PRIMARY,
   primaryDark: PRIMARY_DARK,
@@ -41,6 +77,33 @@ export const Colors = {
     NO_SHOW: NO_SHOW,
     DONE: DONE,
     CANCELLED: CANCELLED,
+  },
+  glass: {
+    fill: GLASS_FILL,
+    fillStrong: GLASS_FILL_STRONG,
+    fillSoft: GLASS_FILL_SOFT,
+    fillPink: GLASS_FILL_PINK,
+    fillPinkStrong: GLASS_FILL_PINK_STRONG,
+    stroke: GLASS_STROKE,
+    strokeSoft: GLASS_STROKE_SOFT,
+    shadow: PRIMARY_DARK,
+    fillSolid: GLASS_FILL_SOLID,
+    fillSolidStrong: GLASS_FILL_SOLID_STRONG,
+    fillPinkSolid: GLASS_FILL_PINK_SOLID,
+    fillPinkSolidStrong: GLASS_FILL_PINK_SOLID_STRONG,
+    shadowCss: GLASS_SHADOW_CSS,
+    shadowCssStrong: GLASS_SHADOW_CSS_STRONG,
+    skeleton: SKELETON_BASE,
+    skeletonShine: SKELETON_SHINE,
+  },
+  ambient: {
+    top: AMBIENT_TOP,
+    mid: AMBIENT_MID,
+    bottom: AMBIENT_BOTTOM,
+    blobPrimary: AMBIENT_BLOB_PRIMARY,
+    blobSecondary: AMBIENT_BLOB_SECONDARY,
+    blobAccent: AMBIENT_BLOB_ACCENT,
+    transparent: "rgba(255,255,255,0)",
   },
   light: {
     tint: PRIMARY,

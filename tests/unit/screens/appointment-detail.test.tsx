@@ -44,7 +44,10 @@ async function abrir(role: Role = "OWNER", datos: Record<string, unknown> = {}) 
   __setAuthUser({ id: "u1", name: "Dueña", email: "a@m.test", role });
   mockApi(base(datos));
   const vista = renderScreen(<AppointmentDetailScreen />);
+  // La cabecera ya existe mientras carga (antes solo salía una ruedita), así que
+  // esperar por el título no basta: hay que esperar a que el esqueleto desaparezca.
   await waitFor(() => expect(screen.getByText("Detalle de cita")).toBeTruthy());
+  await waitFor(() => expect(screen.queryByTestId("cargando-cita")).toBeNull());
   return vista;
 }
 

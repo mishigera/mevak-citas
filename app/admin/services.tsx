@@ -1,17 +1,21 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput, Platform } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, StyleSheet, Platform } from "react-native";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
+import { Radius, Space } from "@/constants/theme";
+import { Screen, ScreenScroll } from "@/components/Screen";
+import { GlassCard, GlassIconButton, GlassSegmented } from "@/components/glass";
+import { PressableMotion, Stagger } from "@/components/motion";
+import { BotonPrimario, CampoTexto, PanelFormulario } from "@/components/Formulario";
+import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
 import { toast, ToastContainer } from "react-toastify";
 
 export default function ServicesScreen() {
-  const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
@@ -57,61 +61,93 @@ export default function ServicesScreen() {
   });
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} hitSlop={12}>
-          <Ionicons name="close" size={24} color={Colors.text} />
-        </Pressable>
-        <Text style={styles.title}>Servicios</Text>
-        <Pressable onPress={() => setShowForm((v) => !v)} hitSlop={12}>
-          <Ionicons name={showForm ? "remove" : "add"} size={24} color={Colors.primary} />
-        </Pressable>
-      </View>
-
-      {showForm && (
-        <View style={styles.form}>
-          <Text style={styles.formTitle}>Nuevo servicio</Text>
-          <View style={styles.typeRow}>
-            {(["FACIAL", "LASER"] as const).map((t) => (
-              <Pressable key={t} style={[styles.typeBtn, type === t && { backgroundColor: Colors.primary, borderColor: Colors.primary }]} onPress={() => setType(t)}>
-                <Text style={[styles.typeBtnText, type === t && { color: "#fff" }]}>{t}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Nombre del servicio" />
-          <TextInput style={styles.input} value={price} onChangeText={setPrice} placeholder="Precio ($)" keyboardType="numeric" />
-          <Pressable style={styles.saveBtn} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); createMutation.mutate(); }} disabled={!name.trim() || !price || createMutation.isPending}>
-            {createMutation.isPending ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Guardar</Text>}
-          </Pressable>
-        </View>
-      )}
-
-      <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-        {isLoading ? (
-          <View style={styles.center}><ActivityIndicator color={Colors.primary} /></View>
-        ) : (
-          <View style={styles.svcList}>
-            {(services || []).map((svc) => (
-              <View key={svc.id} style={styles.svcCard}>
-                <View style={[styles.svcType, { backgroundColor: svc.type === "LASER" ? Colors.secondary + "20" : Colors.accent + "20" }]}>
-                  <Text style={[styles.svcTypeText, { color: svc.type === "LASER" ? Colors.secondary : Colors.accent }]}>{svc.type}</Text>
-                </View>
-                <View style={styles.svcInfo}>
-                  <Text style={styles.svcName}>{svc.name}</Text>
-                  <Text style={styles.svcPrice}>${svc.price}</Text>
-                </View>
-                <Pressable
-                  onPress={() => toggleMutation.mutate({ id: svc.id, isActive: !svc.isActive })}
-                  hitSlop={8}
-                >
-                  <Ionicons name={svc.isActive ? "eye-outline" : "eye-off-outline"} size={20} color={svc.isActive ? Colors.success : Colors.textMuted} />
-                </Pressable>
-              </View>
-            ))}
-          </View>
+    <Screen
+      title="Servicios"
+      hasTabBar={false}
+      backIcon="close"
+      onBack={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))}
+      action={
+        <GlassIconButton
+          name={showForm ? "remove" : "add"}
+          variant="primary"
+          accessibilityLabel={showForm ? "Cerrar formulario" : "Nuevo servicio"}
+          onPress={() => setShowForm((v) => !v)}
+        />
+      }
+    >
+      <ScreenScroll contentStyle={styles.columna}>
+        {showForm && (
+          <PanelFormulario titulo="Nuevo servicio">
+            {/* El selector de tipo ya no son dos botones que se encienden: es el
+                segmentado del sistema, con su pulgar de vidrio deslizándose. */}
+            <GlassSegmented
+              options={[
+                { value: "FACIAL", label: "FACIAL" },
+                { value: "LASER", label: "LASER" },
+              ]}
+              value={type}
+              onChange={setType}
+            />
+            <CampoTexto value={name} onChangeText={setName} placeholder="Nombre del servicio" />
+            <CampoTexto value={price} onChangeText={setPrice} placeholder="Precio ($)" keyboardType="numeric" />
+            <BotonPrimario
+              titulo="Guardar"
+              cargando={createMutation.isPending}
+              disabled={!name.trim() || !price}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                createMutation.mutate();
+              }}
+            />
+          </PanelFormulario>
         )}
-        <View style={{ height: 60 }} />
-      </ScrollView>
+
+        {isLoading ? (
+          <CargandoLista filas={3} />
+        ) : (services || []).length === 0 ? (
+          <EstadoVacio icono="pricetags-outline" titulo="Sin servicios" texto="Toca + para crear el primero" />
+        ) : (
+          <Stagger style={styles.lista}>
+            {(services || []).map((svc) => (
+              <GlassCard key={svc.id} radius={Radius.card}>
+                <View style={styles.fila}>
+                  <View
+                    style={[
+                      styles.tipo,
+                      { backgroundColor: (svc.type === "LASER" ? Colors.secondary : Colors.accent) + "20" },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.tipoTexto,
+                        { color: svc.type === "LASER" ? Colors.secondary : Colors.accent },
+                      ]}
+                    >
+                      {svc.type}
+                    </Text>
+                  </View>
+                  <View style={styles.info}>
+                    <Text style={styles.nombre}>{svc.name}</Text>
+                    <Text style={styles.precio}>${svc.price}</Text>
+                  </View>
+                  <PressableMotion
+                    gesto="escala"
+                    hitSlop={8}
+                    accessibilityLabel={svc.isActive ? "Desactivar servicio" : "Activar servicio"}
+                    onPress={() => toggleMutation.mutate({ id: svc.id, isActive: !svc.isActive })}
+                  >
+                    <Ionicons
+                      name={svc.isActive ? "eye-outline" : "eye-off-outline"}
+                      size={20}
+                      color={svc.isActive ? Colors.success : Colors.textMuted}
+                    />
+                  </PressableMotion>
+                </View>
+              </GlassCard>
+            ))}
+          </Stagger>
+        )}
+      </ScreenScroll>
 
       {Platform.OS === "web" && (
         <ToastContainer
@@ -125,29 +161,17 @@ export default function ServicesScreen() {
           theme="light"
         />
       )}
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 },
-  title: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
-  form: { backgroundColor: "#fff", marginHorizontal: 16, borderRadius: 16, padding: 16, marginBottom: 16, gap: 10 },
-  formTitle: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.text },
-  typeRow: { flexDirection: "row", gap: 8 },
-  typeBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 2, borderColor: Colors.border, alignItems: "center" },
-  typeBtnText: { fontFamily: "Nunito_700Bold", fontSize: 14, color: Colors.textSecondary },
-  input: { backgroundColor: Colors.background, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.text },
-  saveBtn: { backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
-  saveBtnText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: "#fff" },
-  list: { flex: 1, paddingHorizontal: 16 },
-  svcList: { gap: 8 },
-  svcCard: { backgroundColor: "#fff", borderRadius: 14, flexDirection: "row", alignItems: "center", padding: 14, gap: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
-  svcType: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  svcTypeText: { fontFamily: "Nunito_700Bold", fontSize: 10 },
-  svcInfo: { flex: 1 },
-  svcName: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.text },
-  svcPrice: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.primary },
-  center: { justifyContent: "center", alignItems: "center", paddingVertical: 60 },
+  columna: { gap: Space.lg },
+  lista: { gap: Space.sm },
+  fila: { flexDirection: "row", alignItems: "center", padding: Space.lg - 2, gap: Space.md },
+  tipo: { borderRadius: Radius.tile / 2, paddingHorizontal: Space.sm, paddingVertical: Space.xs },
+  tipoTexto: { fontFamily: "Nunito_700Bold", fontSize: 10 },
+  info: { flex: 1 },
+  nombre: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.text },
+  precio: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.primary },
 });

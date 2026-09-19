@@ -254,7 +254,10 @@ describe("agenda", () => {
     renderScreen(<CalendarScreen />);
 
     await waitFor(() => expect(apiCalls().length).toBeGreaterThanOrEqual(2));
-    expect(apiCalls().every((c) => c.path === "/api/appointments")).toBe(true);
+    // Solo se miran las citas: la campana de avisos del header pide además sus
+    // bloqueos y sus pagos pendientes, y eso no es asunto de esta pantalla.
+    const citas = apiCalls().filter((c) => c.path === "/api/appointments");
+    expect(citas.length).toBeGreaterThanOrEqual(2);
   });
 
   it("cambiar de mes vuelve a consultar", async () => {

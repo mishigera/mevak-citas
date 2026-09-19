@@ -1,19 +1,14 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  TextInput,
-  ActivityIndicator,
-  Alert,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, StyleSheet, ScrollView, Alert } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
+import { Radius, Space } from "@/constants/theme";
+import { Screen, ScreenScroll } from "@/components/Screen";
+import { GlassPopover, GlassSegmented, GlassSurface } from "@/components/glass";
+import { PressableMotion, Stagger } from "@/components/motion";
+import { BotonPrimario, CampoTexto } from "@/components/Formulario";
 import { ApiError, apiRequest, getApiUrl, getAuthToken, getErrorMessage } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
@@ -22,17 +17,59 @@ function Label({ children }: { children: string }) {
   return <Text style={styles.label}>{children}</Text>;
 }
 
-function Row({ label, value, onPress }: { label: string; value: string; onPress: () => void }) {
+/**
+ * La fila que abre un selector. El panel se ancla a ella —`position: relative`— para
+ * que nazca justo de donde se ha pulsado y no del centro de la pantalla.
+ */
+function Selector({
+  label,
+  value,
+  abierto,
+  onAbrir,
+  onCerrar,
+  titulo,
+  children,
+}: {
+  label: string;
+  value: string;
+  abierto: boolean;
+  onAbrir: () => void;
+  onCerrar: () => void;
+  titulo: string;
+  children: React.ReactNode;
+}) {
   return (
-    <Pressable style={styles.selectRow} onPress={onPress}>
-      <Text style={[styles.selectVal, !value && { color: Colors.textMuted }]}>{value || `Seleccionar ${label}`}</Text>
-      <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-    </Pressable>
+    <View style={styles.ancla}>
+      <PressableMotion
+        gesto="sutil"
+        accessibilityLabel={value || `Seleccionar ${label}`}
+        accessibilityHasPopup
+        accessibilityState={{ expanded: abierto }}
+        onPress={onAbrir}
+      >
+        <GlassSurface radius={Radius.tile} style={styles.selectorFila}>
+          <Text style={[styles.selectorValor, !value && { color: Colors.textMuted }]}>
+            {value || `Seleccionar ${label}`}
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+        </GlassSurface>
+      </PressableMotion>
+
+      <GlassPopover
+        visible={abierto}
+        onClose={onCerrar}
+        titulo={titulo}
+        origen="arriba-izquierda"
+        diametroOrigen={52}
+        style={styles.panelSelector}
+      >
+        {children}
+      </GlassPopover>
+    </View>
   );
 }
 
 export default function NewAppointmentScreen() {
-  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const qc = useQueryClient();
 
@@ -109,230 +146,171 @@ export default function NewAppointmentScreen() {
     c.fullName.toLowerCase().includes(clientSearch.toLowerCase())
   );
 
-  if (showClientPicker) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.pickerHeader}>
-          <Pressable onPress={() => setShowClientPicker(false)}>
-            <Ionicons name="arrow-back" size={24} color={Colors.text} />
-          </Pressable>
-          <Text style={styles.pickerTitle}>Seleccionar cliente</Text>
-          <View style={{ width: 24 }} />
-        </View>
-        <View style={styles.searchBar}>
-          <Ionicons name="search-outline" size={18} color={Colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Buscar..."
-            value={clientSearch}
-            onChangeText={setClientSearch}
-            autoFocus
-          />
-        </View>
-        <ScrollView style={styles.pickerList}>
-          {filteredClients.map((c) => (
-            <Pressable
-              key={c.id}
-              style={styles.pickerItem}
-              onPress={() => { setClientId(c.id); setClientName(c.fullName); setShowClientPicker(false); }}
-            >
-              <Text style={styles.pickerItemText}>{c.fullName}</Text>
-              <Text style={styles.pickerItemSub}>{c.phone}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
-    );
-  }
-
-  if (showStaffPicker) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.pickerHeader}>
-          <Pressable onPress={() => setShowStaffPicker(false)}>
-            <Ionicons name="arrow-back" size={24} color={Colors.text} />
-          </Pressable>
-          <Text style={styles.pickerTitle}>Seleccionar staff</Text>
-          <View style={{ width: 24 }} />
-        </View>
-        <ScrollView style={styles.pickerList}>
-          {(staff || []).map((s) => (
-            <Pressable
-              key={s.id}
-              style={styles.pickerItem}
-              onPress={() => { setStaffId(s.id); setStaffName(s.name); setShowStaffPicker(false); }}
-            >
-              <Text style={styles.pickerItemText}>{s.name}</Text>
-              <Text style={styles.pickerItemSub}>{s.role === "OWNER" ? "Laserista/Owner" : "Facialista"}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
-    );
-  }
-
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/calendar"))} hitSlop={12}>
-          <Ionicons name="close" size={24} color={Colors.text} />
-        </Pressable>
-        <Text style={styles.title}>Nueva cita</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View style={styles.section}>
-          <Label>Tipo de cita</Label>
-          <View style={styles.typeRow}>
-            {(["FACIAL", "LASER"] as const).map((t) => (
-              <Pressable
-                key={t}
-                style={[styles.typeBtn, type === t && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
-                onPress={() => setType(t)}
-              >
-                <Ionicons name={t === "FACIAL" ? "sparkles" : "flash"} size={18} color={type === t ? "#fff" : Colors.textSecondary} />
-                <Text style={[styles.typeBtnText, type === t && { color: "#fff" }]}>{t}</Text>
-              </Pressable>
-            ))}
+    <Screen
+      title="Nueva cita"
+      hasTabBar={false}
+      backIcon="close"
+      onBack={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/calendar"))}
+    >
+      <ScreenScroll>
+        <Stagger style={styles.campos}>
+          <View style={styles.grupo}>
+            <Label>Tipo de cita</Label>
+            <GlassSegmented
+              options={[
+                { value: "FACIAL", label: "FACIAL" },
+                { value: "LASER", label: "LASER" },
+              ]}
+              value={type}
+              onChange={setType}
+            />
           </View>
-        </View>
 
-        <View style={styles.section}>
-          <Label>Cliente</Label>
-          <Row label="cliente" value={clientName} onPress={() => setShowClientPicker(true)} />
-        </View>
+          <View style={styles.grupo}>
+            <Label>Cliente</Label>
+            <Selector
+              label="cliente"
+              value={clientName}
+              titulo="Clientes"
+              abierto={showClientPicker}
+              onAbrir={() => setShowClientPicker(true)}
+              onCerrar={() => setShowClientPicker(false)}
+            >
+              <View style={styles.buscador}>
+                <CampoTexto
+                  placeholder="Buscar..."
+                  value={clientSearch}
+                  onChangeText={setClientSearch}
+                  autoFocus
+                />
+              </View>
+              <ScrollView style={styles.panelLista} keyboardShouldPersistTaps="handled">
+                <Stagger style={styles.panelListaContenido}>
+                  {filteredClients.map((c) => (
+                    <PressableMotion
+                      key={c.id}
+                      gesto="sutil"
+                      accessibilityLabel={c.fullName}
+                      style={styles.opcion}
+                      onPress={() => {
+                        setClientId(c.id);
+                        setClientName(c.fullName);
+                        setShowClientPicker(false);
+                      }}
+                    >
+                      <Text style={styles.opcionTexto}>{c.fullName}</Text>
+                      <Text style={styles.opcionSub}>{c.phone}</Text>
+                    </PressableMotion>
+                  ))}
+                </Stagger>
+              </ScrollView>
+            </Selector>
+          </View>
 
-        <View style={styles.section}>
-          <Label>Staff asignado</Label>
-          <Row label="staff" value={staffName} onPress={() => setShowStaffPicker(true)} />
-        </View>
+          <View style={styles.grupo}>
+            <Label>Staff asignado</Label>
+            <Selector
+              label="staff"
+              value={staffName}
+              titulo="Staff"
+              abierto={showStaffPicker}
+              onAbrir={() => setShowStaffPicker(true)}
+              onCerrar={() => setShowStaffPicker(false)}
+            >
+              <ScrollView style={styles.panelLista}>
+                <Stagger style={styles.panelListaContenido}>
+                  {(staff || []).map((s) => (
+                    <PressableMotion
+                      key={s.id}
+                      gesto="sutil"
+                      accessibilityLabel={s.name}
+                      style={styles.opcion}
+                      onPress={() => {
+                        setStaffId(s.id);
+                        setStaffName(s.name);
+                        setShowStaffPicker(false);
+                      }}
+                    >
+                      <Text style={styles.opcionTexto}>{s.name}</Text>
+                      <Text style={styles.opcionSub}>
+                        {s.role === "OWNER" ? "Laserista/Owner" : "Facialista"}
+                      </Text>
+                    </PressableMotion>
+                  ))}
+                </Stagger>
+              </ScrollView>
+            </Selector>
+          </View>
 
-        <View style={styles.section}>
-          <Label>Fecha</Label>
-          <TextInput
-            style={styles.textInput}
+          <CampoTexto
+            etiqueta="Fecha"
             value={date}
             onChangeText={setDate}
             placeholder="YYYY-MM-DD"
             keyboardType="numeric"
           />
-        </View>
-
-        <View style={styles.section}>
-          <Label>Hora inicio</Label>
-          <TextInput
-            style={styles.textInput}
+          <CampoTexto
+            etiqueta="Hora inicio"
             value={startTime}
             onChangeText={setStartTime}
             placeholder="HH:MM"
             keyboardType="numeric"
           />
-        </View>
-
-        <View style={styles.section}>
-          <Label>Hora fin</Label>
-          <TextInput
-            style={styles.textInput}
+          <CampoTexto
+            etiqueta="Hora fin"
             value={endTime}
             onChangeText={setEndTime}
             placeholder="HH:MM"
             keyboardType="numeric"
           />
-        </View>
-
-        <View style={styles.section}>
-          <Label>Notas (opcional)</Label>
-          <TextInput
-            style={[styles.textInput, { minHeight: 80, textAlignVertical: "top" }]}
+          <CampoTexto
+            etiqueta="Notas (opcional)"
             value={notes}
             onChangeText={setNotes}
             placeholder="Notas sobre la cita..."
+            estiloCampo={styles.notas}
             multiline
           />
-        </View>
 
-        <Pressable
-          style={({ pressed }) => [styles.saveBtn, (!clientId || !staffId) && { opacity: 0.5 }, pressed && { opacity: 0.8 }]}
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); createMutation.mutate(); }}
-          disabled={!clientId || !staffId || createMutation.isPending}
-        >
-          {createMutation.isPending ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveBtnText}>Crear cita</Text>
-          )}
-        </Pressable>
-
-        <View style={{ height: 60 }} />
-      </ScrollView>
-    </View>
+          <BotonPrimario
+            titulo="Crear cita"
+            style={styles.crear}
+            cargando={createMutation.isPending}
+            disabled={!clientId || !staffId}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              createMutation.mutate();
+            }}
+          />
+        </Stagger>
+      </ScreenScroll>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 },
-  title: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
-  scroll: { flex: 1, paddingHorizontal: 20 },
-  section: { marginBottom: 18 },
-  label: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary, marginBottom: 6 },
-  typeRow: { flexDirection: "row", gap: 10 },
-  typeBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    backgroundColor: "#fff",
-  },
-  typeBtnText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.textSecondary },
-  selectRow: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
+  campos: { gap: Space.lg },
+  grupo: { gap: 6 },
+  label: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary, marginLeft: Space.xs },
+
+  ancla: { position: "relative" },
+  selectorFila: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    paddingHorizontal: Space.lg - 2,
+    paddingVertical: Space.md + 2,
   },
-  selectVal: { fontFamily: "Nunito_600SemiBold", fontSize: 15, color: Colors.text, flex: 1 },
-  textInput: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    fontFamily: "Nunito_400Regular",
-    fontSize: 15,
-    color: Colors.text,
-  },
-  saveBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: "center",
-    marginTop: 8,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  saveBtnText: { fontFamily: "Nunito_700Bold", fontSize: 16, color: "#fff" },
-  pickerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 },
-  pickerTitle: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text },
-  searchBar: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 14, marginHorizontal: 16, marginBottom: 12, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: Colors.border, gap: 8 },
-  searchInput: { flex: 1, fontFamily: "Nunito_400Regular", fontSize: 15, color: Colors.text },
-  pickerList: { flex: 1 },
-  pickerItem: { paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  pickerItemText: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.text },
-  pickerItemSub: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  selectorValor: { fontFamily: "Nunito_600SemiBold", fontSize: 15, color: Colors.text },
+  panelSelector: { top: 56, left: 0, right: 0, maxHeight: 340 },
+  buscador: { paddingHorizontal: Space.md, paddingBottom: Space.sm },
+  panelLista: { maxHeight: 240 },
+  panelListaContenido: { paddingHorizontal: Space.md, paddingBottom: Space.md, gap: Space.xs },
+  opcion: { paddingVertical: Space.md, paddingHorizontal: Space.md, borderRadius: Radius.tile },
+  opcionTexto: { fontFamily: "Nunito_600SemiBold", fontSize: 15, color: Colors.text },
+  opcionSub: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textMuted, marginTop: 1 },
+
+  notas: { minHeight: 80, textAlignVertical: "top" },
+  crear: { marginTop: Space.sm, paddingVertical: Space.lg },
 });

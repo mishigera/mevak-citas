@@ -1,17 +1,32 @@
+/**
+ * La pantalla que se ve cuando algo revienta. Era la plantilla en inglés de Expo, con
+ * su modo oscuro y sus azules de iOS; ahora habla español y usa el mismo vidrio que el
+ * resto de la app.
+ *
+ * Dos cosas la hacen distinta de cualquier otra pantalla, y condicionan lo que puede
+ * usar:
+ *
+ *  - **Se pinta por encima de todo lo demás.** `ErrorBoundary` envuelve al
+ *    `SafeAreaProvider` (`app/_layout.tsx:71`), así que aquí no hay insets que leer:
+ *    `useSafeAreaInsets()` fuera de su proveedor es justamente otra excepción que
+ *    saltaría dentro del manejador de excepciones. Por eso el contenido va centrado y
+ *    el botón de detalle se coloca con margen fijo, sin preguntarle nada al sistema.
+ *  - **El fallo puede venir del router.** `GlassPopover` cierra al navegar y para eso
+ *    lee la ruta; lo hace de forma tolerante (ver `useRutaSegura`), que es lo que
+ *    permite usarlo aquí.
+ *
+ * El detalle del error sigue siendo solo de desarrollo: en producción no se le enseña
+ * una traza de pila a la dueña del centro.
+ */
 import React, { useState } from "react";
 import { reloadAppAsync } from "expo";
-import {
-  StyleSheet,
-  View,
-  Pressable,
-  ScrollView,
-  Text,
-  Modal,
-  useColorScheme,
-  Platform,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Feather } from "@expo/vector-icons";
+import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Colors } from "@/constants/colors";
+import { Radius, Space } from "@/constants/theme";
+import { AmbientBackground } from "@/components/AmbientBackground";
+import { GlassCard, GlassIconButton, GlassPopover } from "@/components/glass";
+import { Entrar, Flotar, PressableMotion, Stagger } from "@/components/motion";
 
 export type ErrorFallbackProps = {
   error: Error;
@@ -19,268 +34,114 @@ export type ErrorFallbackProps = {
 };
 
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
-  const insets = useSafeAreaInsets();
+  const [verDetalle, setVerDetalle] = useState(false);
 
-  const theme = {
-    background: isDark ? "#000000" : "#FFFFFF",
-    backgroundSecondary: isDark ? "#1C1C1E" : "#F2F2F7",
-    text: isDark ? "#FFFFFF" : "#000000",
-    textSecondary: isDark ? "rgba(255, 255, 255, 0.7)" : "rgba(0, 0, 0, 0.7)",
-    link: "#007AFF",
-    buttonText: "#FFFFFF",
-  };
-
-  const [isModalVisible, setIsModalVisible] = useState(false);
-
-  const handleRestart = async () => {
+  const reiniciar = async () => {
     try {
       await reloadAppAsync();
-    } catch (restartError) {
-      console.error("Failed to restart app:", restartError);
+    } catch (fallo) {
+      // Si ni siquiera se puede recargar, al menos se intenta volver a montar el árbol.
+      console.error("No se pudo reiniciar la app:", fallo);
       resetError();
     }
   };
 
-  const formatErrorDetails = (): string => {
-    let details = `Error: ${error.message}\n\n`;
-    if (error.stack) {
-      details += `Stack Trace:\n${error.stack}`;
-    }
-    return details;
-  };
+  const detalle = error.stack ? `${error.message}\n\n${error.stack}` : error.message;
 
-  const monoFont = Platform.select({
-    ios: "Menlo",
-    android: "monospace",
-    default: "monospace",
-  });
+  const fuenteMono = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
+    <View style={estilos.contenedor}>
+      <AmbientBackground />
+
       {__DEV__ ? (
-        <Pressable
-          onPress={() => setIsModalVisible(true)}
-          accessibilityLabel="View error details"
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.topButton,
-            {
-              top: insets.top + 16,
-              backgroundColor: theme.backgroundSecondary,
-              opacity: pressed ? 0.8 : 1,
-            },
-          ]}
-        >
-          <Feather name="alert-circle" size={20} color={theme.text} />
-        </Pressable>
+        <View style={estilos.esquina}>
+          <GlassIconButton
+            name="bug-outline"
+            onPress={() => setVerDetalle(true)}
+            accessibilityLabel="Ver detalle del error"
+            accessibilityHasPopup
+            accessibilityState={{ expanded: verDetalle }}
+          />
+        </View>
       ) : null}
 
-      <View style={styles.content}>
-        <Text style={[styles.title, { color: theme.text }]}>
-          Something went wrong
-        </Text>
+      <Entrar style={estilos.centro}>
+        <GlassCard tone="pink" radius={Radius.panel} elevation="lifted" style={estilos.tarjeta}>
+          <Stagger style={estilos.pila}>
+            <Flotar style={estilos.icono}>
+              <Ionicons name="heart-dislike-outline" size={44} color={Colors.primary} />
+            </Flotar>
 
-        <Text style={[styles.message, { color: theme.textSecondary }]}>
-          Please reload the app to continue.
-        </Text>
+            <Text style={estilos.titulo}>Algo se ha roto</Text>
 
-        <Pressable
-          onPress={handleRestart}
-          style={({ pressed }) => [
-            styles.button,
-            {
-              backgroundColor: theme.link,
-              opacity: pressed ? 0.9 : 1,
-              transform: [{ scale: pressed ? 0.98 : 1 }],
-            },
-          ]}
-        >
-          <Text style={[styles.buttonText, { color: theme.buttonText }]}>
-            Try Again
-          </Text>
-        </Pressable>
-      </View>
+            <Text style={estilos.mensaje}>
+              No es culpa tuya. Vuelve a cargar la app y sigue donde lo dejaste.
+            </Text>
+
+            <PressableMotion onPress={reiniciar} gesto="elevar" style={estilos.boton}>
+              <View style={estilos.botonFondo}>
+                <Text style={estilos.botonTexto}>Volver a cargar</Text>
+              </View>
+            </PressableMotion>
+          </Stagger>
+        </GlassCard>
+      </Entrar>
 
       {__DEV__ ? (
-        <Modal
-          visible={isModalVisible}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setIsModalVisible(false)}
+        <GlassPopover
+          visible={verDetalle}
+          onClose={() => setVerDetalle(false)}
+          titulo="Detalle del error"
+          origen="arriba-derecha"
+          style={estilos.panel}
+          testID="panel-error"
         >
-          <View style={styles.modalOverlay}>
-            <View
-              style={[
-                styles.modalContainer,
-                { backgroundColor: theme.background },
-              ]}
-            >
-              <View
-                style={[
-                  styles.modalHeader,
-                  {
-                    borderBottomColor: isDark
-                      ? "rgba(255, 255, 255, 0.1)"
-                      : "rgba(0, 0, 0, 0.1)",
-                  },
-                ]}
-              >
-                <Text style={[styles.modalTitle, { color: theme.text }]}>
-                  Error Details
-                </Text>
-                <Pressable
-                  onPress={() => setIsModalVisible(false)}
-                  accessibilityLabel="Close error details"
-                  accessibilityRole="button"
-                  style={({ pressed }) => [
-                    styles.closeButton,
-                    { opacity: pressed ? 0.6 : 1 },
-                  ]}
-                >
-                  <Feather name="x" size={24} color={theme.text} />
-                </Pressable>
-              </View>
-
-              <ScrollView
-                style={styles.modalScrollView}
-                contentContainerStyle={[
-                  styles.modalScrollContent,
-                  { paddingBottom: insets.bottom + 16 },
-                ]}
-                showsVerticalScrollIndicator
-              >
-                <View
-                  style={[
-                    styles.errorContainer,
-                    { backgroundColor: theme.backgroundSecondary },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.errorText,
-                      {
-                        color: theme.text,
-                        fontFamily: monoFont,
-                      },
-                    ]}
-                    selectable
-                  >
-                    {formatErrorDetails()}
-                  </Text>
-                </View>
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
+          <ScrollView style={estilos.scroll} contentContainerStyle={estilos.scrollContenido}>
+            <Text style={[estilos.traza, { fontFamily: fuenteMono }]} selectable>
+              {detalle}
+            </Text>
+          </ScrollView>
+        </GlassPopover>
       ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    width: "100%",
-    height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  content: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    width: "100%",
-    maxWidth: 600,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
+const estilos = StyleSheet.create({
+  contenedor: { flex: 1, width: "100%", height: "100%", backgroundColor: Colors.ambient.top },
+  centro: { flex: 1, alignItems: "center", justifyContent: "center", padding: Space.xl },
+  tarjeta: { width: "100%", maxWidth: 420, padding: Space.xl },
+  pila: { alignItems: "center", gap: Space.md },
+  icono: { marginBottom: Space.xs },
+  titulo: {
+    fontFamily: "Nunito_800ExtraBold",
+    fontSize: 22,
+    color: Colors.text,
     textAlign: "center",
-    lineHeight: 40,
   },
-  message: {
-    fontSize: 16,
+  mensaje: {
+    fontFamily: "Nunito_400Regular",
+    fontSize: 14,
+    lineHeight: 21,
+    color: Colors.textSecondary,
     textAlign: "center",
-    lineHeight: 24,
   },
-  topButton: {
-    position: "absolute",
-    right: 16,
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  button: {
-    paddingVertical: 16,
-    borderRadius: 8,
-    paddingHorizontal: 24,
+  boton: { borderRadius: Radius.control, marginTop: Space.sm },
+  botonFondo: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.control,
+    paddingVertical: Space.md,
+    paddingHorizontal: Space.xl,
     minWidth: 200,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  buttonText: {
-    fontWeight: "600",
-    textAlign: "center",
-    fontSize: 16,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContainer: {
-    width: "100%",
-    height: "90%",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "600",
-  },
-  closeButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalScrollView: {
-    flex: 1,
-  },
-  modalScrollContent: {
-    padding: 16,
-  },
-  errorContainer: {
-    width: "100%",
-    borderRadius: 8,
-    overflow: "hidden",
-    padding: 16,
-  },
-  errorText: {
-    fontSize: 12,
-    lineHeight: 18,
-    width: "100%",
-  },
+  botonTexto: { fontFamily: "Nunito_700Bold", fontSize: 15, color: "#fff" },
+  esquina: { position: "absolute", top: 44, right: Space.lg, zIndex: 20 },
+  panel: { top: 44, right: Space.lg, left: Space.lg, maxHeight: "70%" },
+  scroll: { maxHeight: 360 },
+  scrollContenido: { paddingHorizontal: Space.lg, paddingBottom: Space.lg },
+  traza: { fontSize: 12, lineHeight: 18, color: Colors.text },
 });
+
+export default ErrorFallback;

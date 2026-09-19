@@ -1,18 +1,14 @@
 import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Alert,
-  Platform,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, StyleSheet, ScrollView, Alert } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
+import { Radius, Space } from "@/constants/theme";
 import { useAuth } from "@/contexts/auth";
+import { useBreakpoint } from "@/lib/responsive";
+import { ContentColumn, Screen, useScreenLayout } from "@/components/Screen";
+import { GlassCard } from "@/components/glass";
+import { PressableMotion, Stagger } from "@/components/motion";
 import * as Haptics from "expo-haptics";
 
 function MenuItem({
@@ -32,8 +28,10 @@ function MenuItem({
 }) {
   const iconColor = danger ? Colors.error : color || Colors.primary;
   return (
-    <Pressable
-      style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]}
+    <PressableMotion
+      gesto="sutil"
+      accessibilityLabel={label}
+      style={styles.menuItem}
       onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(); }}
     >
       <View style={[styles.menuIcon, { backgroundColor: iconColor + "18" }]}>
@@ -44,21 +42,47 @@ function MenuItem({
         {sublabel && <Text style={styles.menuSublabel}>{sublabel}</Text>}
       </View>
       <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-    </Pressable>
+    </PressableMotion>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
+    // El ancho de la celda lo pone el envoltorio del escalonado (ver `Cuerpo`), no
+    // esta seccion: si lo pusieran los dos, en iPad cada tarjeta mediria el 48% del
+    // 48% y quedarian cuatro columnas flacas.
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.sectionCard}>{children}</View>
+      <GlassCard radius={Radius.card}>{children}</GlassCard>
     </View>
   );
 }
 
+/** El cuerpo, separado para poder leer `useScreenLayout()` dentro de `<Screen>`. */
+function Cuerpo({ children }: { children: React.ReactNode }) {
+  const { paddingTop, paddingBottom } = useScreenLayout();
+  const { isExpanded } = useBreakpoint();
+  return (
+    <ScrollView
+      contentContainerStyle={{ paddingTop, paddingBottom }}
+      showsVerticalScrollIndicator={false}
+      contentInsetAdjustmentBehavior="automatic"
+    >
+      <ContentColumn>
+        {/* Escalonado: la tarjeta de perfil y cada seccion entran una detras de otra.
+            En iPad apaisado el propio escalonado es la rejilla de dos columnas. */}
+        <Stagger
+          style={isExpanded ? styles.rejilla : undefined}
+          envoltorio={isExpanded ? styles.seccionMitad : undefined}
+        >
+          {children}
+        </Stagger>
+      </ContentColumn>
+    </ScrollView>
+  );
+}
+
 export default function MoreScreen() {
-  const insets = useSafeAreaInsets();
   const { user, logout, canCreateBlocks, canManageServices, canViewReports, isOwnerOrAdmin } = useAuth();
 
   const roleLabels: Record<string, string> = {
@@ -86,18 +110,19 @@ export default function MoreScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0) }]}>
-      <Text style={styles.title}>Más</Text>
-      <ScrollView showsVerticalScrollIndicator={false} contentInsetAdjustmentBehavior="automatic">
-        <View style={styles.profileCard}>
-          <View style={styles.profileAvatar}>
-            <Ionicons name="person" size={28} color={Colors.primary} />
+    <Screen avisos title="Más">
+      <Cuerpo>
+        <GlassCard radius={Radius.card} style={styles.profileCard}>
+          <View style={styles.profileFila}>
+            <View style={styles.profileAvatar}>
+              <Ionicons name="person" size={28} color={Colors.primary} />
+            </View>
+            <View>
+              <Text style={styles.profileName}>{user?.name}</Text>
+              <Text style={styles.profileRole}>{roleLabels[user?.role || ""] || user?.role}</Text>
+            </View>
           </View>
-          <View>
-            <Text style={styles.profileName}>{user?.name}</Text>
-            <Text style={styles.profileRole}>{roleLabels[user?.role || ""] || user?.role}</Text>
-          </View>
-        </View>
+        </GlassCard>
 
         {canCreateBlocks && (
           <Section title="Disponibilidad">
@@ -167,30 +192,17 @@ export default function MoreScreen() {
           />
         </Section>
 
-        <View style={{ height: 120 }} />
-      </ScrollView>
-    </View>
+      </Cuerpo>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  title: { fontFamily: "Nunito_800ExtraBold", fontSize: 26, color: Colors.text, paddingHorizontal: 20, marginBottom: 16 },
-  profileCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    marginHorizontal: 16,
-    marginBottom: 20,
-    borderRadius: 16,
-    padding: 16,
-    gap: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
-  },
+  rejilla: { flexDirection: "row", flexWrap: "wrap", gap: Space.lg, alignItems: "flex-start" },
+  seccionMitad: { width: "48%", marginBottom: 0 },
+
+  profileCard: { marginBottom: Space.xl, width: "100%" },
+  profileFila: { flexDirection: "row", alignItems: "center", padding: Space.lg, gap: Space.lg - 2 },
   profileAvatar: {
     width: 52,
     height: 52,
@@ -201,30 +213,29 @@ const styles = StyleSheet.create({
   },
   profileName: { fontFamily: "Nunito_700Bold", fontSize: 17, color: Colors.text },
   profileRole: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  section: { marginBottom: 16 },
-  sectionTitle: { fontFamily: "Nunito_700Bold", fontSize: 12, color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.8, marginLeft: 20, marginBottom: 8 },
-  sectionCard: {
-    backgroundColor: "#fff",
-    marginHorizontal: 16,
-    borderRadius: 16,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+
+  section: { marginBottom: Space.lg, width: "100%" },
+  sectionTitle: {
+    fontFamily: "Nunito_700Bold",
+    fontSize: 12,
+    color: Colors.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginLeft: Space.xs,
+    marginBottom: Space.sm,
   },
+
   menuItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: Space.lg,
+    paddingVertical: Space.lg - 2,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    gap: 14,
+    borderBottomColor: Colors.glass.strokeSoft,
+    gap: Space.lg - 2,
   },
-  menuIcon: { width: 40, height: 40, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+  menuIcon: { width: 40, height: 40, borderRadius: Radius.tile, justifyContent: "center", alignItems: "center" },
   menuText: { flex: 1 },
   menuLabel: { fontFamily: "Nunito_600SemiBold", fontSize: 15, color: Colors.text },
-  menuSublabel: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  menuSublabel: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
 });

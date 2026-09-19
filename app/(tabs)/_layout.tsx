@@ -1,15 +1,15 @@
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Redirect, Tabs } from "expo-router";
 import { NativeTabs, Icon, Label } from "expo-router/unstable-native-tabs";
-import { BlurView } from "expo-blur";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Colors } from "@/constants/colors";
+import { GlassTabBar } from "@/components/GlassTabBar";
 import { useAuth } from "@/contexts/auth";
 import React from "react";
 
 function NativeTabLayout() {
-  const { canViewReports } = useAuth();
+  // OJO: aquí se leia `canViewReports` y no se usaba para nada. Se quita el lint
+  // warning, pero la intencion original (¿una pestaña de reportes solo para quien
+  // puede verlos?) nunca se implemento. Anotado en deuda-tecnica.
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
@@ -33,30 +33,19 @@ function NativeTabLayout() {
 }
 
 function ClassicTabLayout() {
-  const isIOS = Platform.OS === "ios";
-  const isWeb = Platform.OS === "web";
-
   return (
     <Tabs
+      // La barra la pinta `GlassTabBar`: píldora flotante en celular, riel en iPad.
+      // `tabBarStyle` no daria para eso, y además la barra tiene que flotar por
+      // encima del contenido para que el desenfoque tenga algo que desenfocar.
+      tabBar={(props) => <GlassTabBar {...props} />}
       screenOptions={{
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.textMuted,
         headerShown: false,
-        tabBarStyle: {
-          position: "absolute",
-          backgroundColor: isIOS ? "transparent" : isWeb ? "#fff" : "#fff",
-          borderTopWidth: isWeb ? 1 : 0,
-          borderTopColor: Colors.border,
-          elevation: 0,
-          ...(isWeb ? { height: 84 } : {}),
-        },
-        tabBarLabelStyle: { fontFamily: "Nunito_600SemiBold", fontSize: 11 },
-        tabBarBackground: () =>
-          isIOS ? (
-            <BlurView intensity={100} tint="light" style={StyleSheet.absoluteFill} />
-          ) : isWeb ? (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: "#fff" }]} />
-          ) : null,
+        sceneStyle: { backgroundColor: "transparent" },
+        // Las pestañas no se destruyen al cambiar: sin esto, volver a una ya montada
+        // es un corte seco porque su contenido no vuelve a entrar. El fundido lo
+        // resuelve sin remontar nada (y sin perder el scroll de cada pestaña).
+        animation: "fade",
       }}
     >
       <Tabs.Screen
