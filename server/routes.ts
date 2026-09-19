@@ -170,7 +170,8 @@ function fueraDeHorario(inicioISO: string, finISO: string): string | null {
   const horario = storage.centerHours.get(String(inicio.getDay()));
   if (!horario) return null;
 
-  const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  // En plural, que es como se dice: "los sábados", no "los sábado".
+  const DIAS = ["domingos", "lunes", "martes", "miércoles", "jueves", "viernes", "sábados"];
   if (!horario.open) return `El centro no abre los ${DIAS[inicio.getDay()]}`;
 
   const abre = minutosDeHora(horario.opensAt);

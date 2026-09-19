@@ -392,7 +392,7 @@ describe("horario del centro", () => {
     const res = await crear(app, token, enDomingo);
 
     expect(res.status).toBe(409);
-    expect(res.body.message).toMatch(/no abre los domingo/i);
+    expect(res.body.message).toBe("El centro no abre los domingos");
   });
 
   it("409 antes de la hora de apertura", async () => {
@@ -402,7 +402,7 @@ describe("horario del centro", () => {
     });
 
     expect(res.status).toBe(409);
-    expect(res.body.message).toMatch(/abre de 09:00 a 19:00/i);
+    expect(res.body.message).toBe("Los jueves el centro abre de 09:00 a 19:00");
   });
 
   it("409 si termina después del cierre", async () => {
