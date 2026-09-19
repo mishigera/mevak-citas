@@ -222,24 +222,35 @@ describe("invariantes de permisos", () => {
     const { app, storage } = await appConRoles();
     // Token que dice OWNER pero apunta a un usuario RECEPTION real.
     const falso = "token-falsificado";
-    storage.tokens.set(falso, { userId: "u-RECEPTION", role: "OWNER" as never });
+    storage.tokens.set(falso, { userId: "u-RECEPTION", role: "OWNER" as never, issuedAt: new Date().toISOString() });
 
     const res = await request(app).post("/api/services")
       .set("Authorization", `Bearer ${falso}`)
       .send({ name: "S", type: "FACIAL", price: 100 });
 
-    // Documenta el diseño actual: la autoridad es el rol guardado en el token,
-    // no el del usuario. Como el token solo lo emite el login, no es explotable
-    // desde fuera — pero conviene saberlo si algún día se firman tokens.
-    expect(res.status).not.toBe(403);
+    // Antes la autoridad era el rol guardado en el token y esto pasaba. Desde la deuda
+    // §2 el rol se lee del usuario en cada petición: el del token no cuenta.
+    expect(res.status).toBe(403);
+  });
+
+  it("cambiar el rol de alguien surte efecto sin que vuelva a entrar", async () => {
+    const { app, storage, tokens } = await appConRoles();
+    const user = storage.users.get("u-RECEPTION")!;
+    user.role = "OWNER";
+    storage.users.set(user.id, user);
+
+    const res = await request(app).get("/api/reports/income")
+      .set("Authorization", `Bearer ${tokens.RECEPTION}`);
+
+    expect(res.status).toBe(200);
   });
 });
 
 describe("endpoints de solo lectura abiertos a cualquier rol autenticado", () => {
   it.each([
-    "/api/users", "/api/users/staff", "/api/clients", "/api/services",
-    "/api/packages", "/api/laser-areas", "/api/appointments", "/api/blocks",
-  ])("%s responde 200 a los cuatro roles", async (path) => {
+    "/api/users/staff", "/api/clients", "/api/services", "/api/packages",
+    "/api/laser-areas", "/api/appointments", "/api/blocks", "/api/center-hours",
+  ])("%s responde 200 a los tres roles", async (path) => {
     const { app, tokens } = await appConRoles();
     for (const rol of ROLES) {
       const res = await request(app).get(path).set("Authorization", `Bearer ${tokens[rol]}`);
@@ -253,12 +264,30 @@ describe("endpoints de solo lectura abiertos a cualquier rol autenticado", () =>
       expect((await request(app).get(path)).status).toBe(401);
     });
 
+  /** Deuda §33: cualquiera listaba nombre, correo y rol de todo el staff. */
+  it("GET /api/users es solo de la dueña", async () => {
+    const { app, tokens } = await appConRoles();
+
+    for (const rol of ["RECEPTION", "FACIALIST"] as const) {
+      const res = await request(app).get("/api/users").set("Authorization", `Bearer ${tokens[rol]}`);
+      expect({ rol, status: res.status }).toEqual({ rol, status: 403 });
+    }
+  });
+
   it("GET /api/users nunca expone passwordHash", async () => {
     const { app, tokens } = await appConRoles();
     const res = await request(app).get("/api/users")
-      .set("Authorization", `Bearer ${tokens.RECEPTION}`);
+      .set("Authorization", `Bearer ${tokens.OWNER}`);
 
     expect(res.body.length).toBeGreaterThan(0);
     res.body.forEach((u: object) => expect(u).not.toHaveProperty("passwordHash"));
+  });
+
+  it("GET /api/users/staff no expone correos", async () => {
+    const { app, tokens } = await appConRoles();
+    const res = await request(app).get("/api/users/staff")
+      .set("Authorization", `Bearer ${tokens.FACIALIST}`);
+
+    res.body.forEach((u: object) => expect(u).not.toHaveProperty("email"));
   });
 });

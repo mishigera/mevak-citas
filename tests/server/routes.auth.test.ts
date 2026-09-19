@@ -43,7 +43,9 @@ describe("login", () => {
     const { app, storage } = await buildApp({ users: [usuario()] });
     const res = await login(app, { email: "duena@mevak.test", password: PASSWORD });
 
-    expect(storage.tokens.get(res.body.token)).toEqual({ userId: "u1", role: "OWNER" });
+    expect(storage.tokens.get(res.body.token)).toEqual({
+      userId: "u1", role: "OWNER", issuedAt: expect.any(String),
+    });
   });
 
   it("emite un token distinto en cada login", async () => {
@@ -149,10 +151,15 @@ describe("logout", () => {
   });
 });
 
-describe("hueco conocido: desactivar un usuario no cierra sus sesiones (deuda §2)", () => {
-  // requireAuth solo mira storage.tokens; nunca vuelve a comprobar el usuario.
-  // Este test documenta el comportamiento ACTUAL. Cuando se arregle, hay que invertirlo.
-  it("un token sigue siendo válido tras desactivar al usuario", async () => {
+/** Deuda §2, cerrada en p005 fase D. Antes un token valía para siempre. */
+describe("caducidad y revocación de sesiones", () => {
+  const TTL_ORIGINAL = process.env.TOKEN_TTL_DAYS;
+  afterEach(() => {
+    process.env.TOKEN_TTL_DAYS = TTL_ORIGINAL;
+    jest.useRealTimers();
+  });
+
+  it("desactivar a alguien cierra sus sesiones al momento", async () => {
     const { app, storage } = await buildApp({ users: [usuario()] });
     const { body } = await login(app, { email: "duena@mevak.test", password: PASSWORD });
 
@@ -161,6 +168,84 @@ describe("hueco conocido: desactivar un usuario no cierra sus sesiones (deuda §
 
     const res = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${body.token}`);
 
-    expect(res.status).toBe(200); // ← debería ser 401 una vez cerrada la deuda §2
+    expect(res.status).toBe(401);
+    // Y el token se borra, no se queda ocupando sitio.
+    expect(storage.tokens.get(body.token)).toBeUndefined();
+  });
+
+  it("desactivar desde la API también revoca, sin esperar a la siguiente petición", async () => {
+    const { app, storage } = await buildApp({ users: [usuario(), usuario({ id: "u2", email: "facial@mevak.test", role: "FACIALIST" })] });
+    const dueña = await login(app, { email: "duena@mevak.test", password: PASSWORD });
+    const facialista = await login(app, { email: "facial@mevak.test", password: PASSWORD });
+
+    await request(app).patch("/api/users/u2")
+      .set("Authorization", `Bearer ${dueña.body.token}`).send({ isActive: false });
+
+    expect(storage.tokens.get(facialista.body.token)).toBeUndefined();
+  });
+
+  it("cambiar la contraseña cierra las sesiones abiertas", async () => {
+    const { app, storage } = await buildApp({ users: [usuario()] });
+    const { body } = await login(app, { email: "duena@mevak.test", password: PASSWORD });
+
+    await request(app).patch("/api/users/u1")
+      .set("Authorization", `Bearer ${body.token}`).send({ password: "otra-clave" });
+
+    expect(storage.tokens.get(body.token)).toBeUndefined();
+  });
+
+  it("un token caduca pasados los días configurados", async () => {
+    process.env.TOKEN_TTL_DAYS = "7";
+    const { app } = await buildApp({ users: [usuario()] });
+    const { body } = await login(app, { email: "duena@mevak.test", password: PASSWORD });
+
+    jest.useFakeTimers({ now: Date.now() + 8 * 86_400_000, doNotFake: ["nextTick", "setImmediate"] });
+    const res = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${body.token}`);
+
+    expect(res.status).toBe(401);
+  });
+
+  it("dentro del plazo sigue valiendo", async () => {
+    process.env.TOKEN_TTL_DAYS = "7";
+    const { app } = await buildApp({ users: [usuario()] });
+    const { body } = await login(app, { email: "duena@mevak.test", password: PASSWORD });
+
+    jest.useFakeTimers({ now: Date.now() + 6 * 86_400_000, doNotFake: ["nextTick", "setImmediate"] });
+    const res = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${body.token}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  it("sin TOKEN_TTL_DAYS, 30 días", async () => {
+    delete process.env.TOKEN_TTL_DAYS;
+    const { app } = await buildApp({ users: [usuario()] });
+    const { body } = await login(app, { email: "duena@mevak.test", password: PASSWORD });
+
+    jest.useFakeTimers({ now: Date.now() + 31 * 86_400_000, doNotFake: ["nextTick", "setImmediate"] });
+
+    expect((await request(app).get("/api/auth/me").set("Authorization", `Bearer ${body.token}`)).status).toBe(401);
+  });
+
+  it("un token sin fecha no vale", async () => {
+    const { app, storage } = await buildApp({ users: [usuario()] });
+    storage.tokens.set("viejo", { userId: "u1", role: "OWNER" });
+
+    expect((await request(app).get("/api/auth/me").set("Authorization", "Bearer viejo")).status).toBe(401);
+  });
+
+  it("un token de un usuario que ya no existe no vale", async () => {
+    const { app, storage } = await buildApp({ users: [usuario()] });
+    storage.tokens.set("huerfano", { userId: "borrado", role: "OWNER", issuedAt: new Date().toISOString() });
+
+    expect((await request(app).get("/api/auth/me").set("Authorization", "Bearer huerfano")).status).toBe(401);
+  });
+
+  it("el login barre los tokens caducados", async () => {
+    const { app, storage } = await buildApp({ users: [usuario()] });
+    storage.tokens.set("rancio", { userId: "u1", role: "OWNER", issuedAt: "2020-01-01T00:00:00.000Z" });
+
+    await login(app, { email: "duena@mevak.test", password: PASSWORD });
+
+    expect(storage.tokens.get("rancio")).toBeUndefined();
   });
 });

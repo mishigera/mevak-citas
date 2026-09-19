@@ -44,9 +44,22 @@ export async function buildApp(
  * Inserta un token de sesión directamente, sin pasar por el login.
  * Evita el coste de bcrypt en los tests que solo necesitan estar autenticados.
  */
+/**
+ * Un token válido para `userId`.
+ *
+ * Desde la deuda §2 la sesión se valida contra el usuario —tiene que existir y estar
+ * activo— y caduca, así que el token lleva fecha de emisión y, si el usuario no está
+ * sembrado, se crea uno mínimo con ese rol para que la prueba se centre en lo suyo.
+ */
 export function authAs(storage: Storage, userId: string, role: string): string {
+  if (!storage.users.get(userId)) {
+    storage.users.set(userId, {
+      id: userId, name: userId, email: `${userId}@auth.test`, passwordHash: "h",
+      role: role as never, isActive: true, createdAt: "2026-01-01T00:00:00.000Z",
+    });
+  }
   const token = `test-token-${role}-${userId}`;
-  storage.tokens.set(token, { userId, role: role as never });
+  storage.tokens.set(token, { userId, role: role as never, issuedAt: new Date().toISOString() });
   return token;
 }
 

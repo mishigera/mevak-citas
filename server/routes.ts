@@ -25,27 +25,70 @@ function paramId(req: Request): string {
   return raw || "";
 }
 
-function requireAuth(req: Request, res: Response, next: NextFunction) {
+/** Días que dura una sesión. Configurable; 30 por defecto. */
+function diasDeSesion(): number {
+  const dias = Number(process.env.TOKEN_TTL_DAYS);
+  return Number.isFinite(dias) && dias > 0 ? dias : 30;
+}
+
+function caducado(issuedAt: string | undefined): boolean {
+  if (!issuedAt) return true;
+  const emitido = new Date(issuedAt).getTime();
+  if (Number.isNaN(emitido)) return true;
+  return Date.now() - emitido > diasDeSesion() * 86_400_000;
+}
+
+/**
+ * Quién hace la petición, o `null` si no hay sesión válida.
+ *
+ * Antes bastaba con que el token existiera: no caducaba nunca, desactivar a alguien no
+ * le cerraba la sesión y el rol salía del token, no del usuario — así que cambiarle el
+ * rol a alguien no surtía efecto hasta que volviera a entrar. Deuda §2.
+ *
+ * Ahora el rol y el estado se leen del usuario en cada petición. Es un `Map.get`: no
+ * cuesta nada.
+ */
+function sesionValida(req: Request): { userId: string; role: Role } | null {
   const token = getToken(req);
-  if (!token) return res.status(401).json({ message: "Unauthorized" });
+  if (!token) return null;
   const session = storage.tokens.get(token);
-  if (!session) return res.status(401).json({ message: "Unauthorized" });
-  req.userId = session.userId;
-  req.userRole = session.role;
+  if (!session) return null;
+  if (caducado(session.issuedAt)) {
+    storage.tokens.delete(token);
+    return null;
+  }
+  const user = storage.users.get(session.userId);
+  if (!user || !user.isActive) {
+    storage.tokens.delete(token);
+    return null;
+  }
+  return { userId: user.id, role: user.role };
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const sesion = sesionValida(req);
+  if (!sesion) return res.status(401).json({ message: "Unauthorized" });
+  req.userId = sesion.userId;
+  req.userRole = sesion.role;
   next();
 }
 
 function requireRole(...roles: Role[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const token = getToken(req);
-    if (!token) return res.status(401).json({ message: "Unauthorized" });
-    const session = storage.tokens.get(token);
-    if (!session) return res.status(401).json({ message: "Unauthorized" });
-    if (!roles.includes(session.role)) return res.status(403).json({ message: "Forbidden" });
-    req.userId = session.userId;
-    req.userRole = session.role;
+    const sesion = sesionValida(req);
+    if (!sesion) return res.status(401).json({ message: "Unauthorized" });
+    if (!roles.includes(sesion.role)) return res.status(403).json({ message: "Forbidden" });
+    req.userId = sesion.userId;
+    req.userRole = sesion.role;
     next();
   };
+}
+
+/** Cierra todas las sesiones de un usuario. */
+function revocarSesiones(userId: string) {
+  Array.from(storage.tokens.entries())
+    .filter(([, s]) => s.userId === userId)
+    .forEach(([token]) => storage.tokens.delete(token));
 }
 
 /** Lo que dura un servicio si nadie dijo otra cosa. */
@@ -183,8 +226,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!user) return res.status(401).json({ message: "Credenciales incorrectas" });
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) return res.status(401).json({ message: "Credenciales incorrectas" });
+    // De paso se barren los caducados: la entidad `tokens` crecía sin techo, un token por
+    // cada login, y se reescribe entera en cada flush.
+    Array.from(storage.tokens.entries())
+      .filter(([, s]) => caducado(s.issuedAt))
+      .forEach(([t]) => storage.tokens.delete(t));
     const token = randomUUID();
-    storage.tokens.set(token, { userId: user.id, role: user.role });
+    storage.tokens.set(token, { userId: user.id, role: user.role, issuedAt: new Date().toISOString() });
     res.json({ token, id: user.id, name: user.name, email: user.email, role: user.role });
   });
 
@@ -201,7 +249,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // USERS
-  app.get("/api/users", requireAuth, (req, res) => {
+  // Nombre, correo, rol y estado de todo el staff: solo la dueña. Las demás pantallas
+  // tienen `users/staff`, que no expone correos (deuda §33).
+  app.get("/api/users", requireRole("OWNER"), (req, res) => {
     const users = Array.from(storage.users.values()).map((u) => ({
       id: u.id, name: u.name, email: u.email, role: u.role, isActive: u.isActive, createdAt: u.createdAt,
     }));
@@ -236,6 +286,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (isActive !== undefined) user.isActive = isActive;
     if (password) user.passwordHash = await bcrypt.hash(password, 10);
     storage.users.set(user.id, user);
+    // Desactivar a alguien o cambiarle la contraseña tiene que sacarla de todas partes:
+    // si la facialista se va, su teléfono no puede seguir dentro.
+    if (isActive === false || password) revocarSesiones(user.id);
     res.json({ id: user.id, name: user.name, email: user.email, role: user.role, isActive: user.isActive });
   });
 
@@ -265,10 +318,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(201).json(client);
   });
 
+  /**
+   * Solo los campos editables. Con `Object.assign(client, req.body)` un `id` en el cuerpo
+   * reescribía el objeto bajo otra clave y dejaba dos entradas del Map apuntando al
+   * mismo cliente. Deuda §32.
+   */
+  const CAMPOS_CLIENTE = ["fullName", "phone", "email", "birthDate", "sex", "occupation"] as const;
+
   app.patch("/api/clients/:id", requireAuth, (req, res) => {
     const client = storage.clients.get(paramId(req));
     if (!client) return res.status(404).json({ message: "Not found" });
-    Object.assign(client, req.body);
+    CAMPOS_CLIENTE.forEach((campo) => {
+      if (req.body[campo] !== undefined) (client as unknown as Record<string, unknown>)[campo] = req.body[campo];
+    });
     storage.clients.set(client.id, client);
     res.json(client);
   });
@@ -425,7 +487,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/services/:id", requireRole("OWNER"), (req, res) => {
     const svc = storage.services.get(paramId(req));
     if (!svc) return res.status(404).json({ message: "Not found" });
-    Object.assign(svc, req.body);
+    // Lista blanca, igual que en clientes (deuda §32). El `type` no se cambia: una
+    // cita facial con un servicio que pasa a ser de láser no tiene arreglo limpio.
+    const { name, price, durationMinutes, isActive } = req.body;
+    if (name !== undefined) svc.name = name;
+    if (price !== undefined) svc.price = Number(price);
+    if (durationMinutes !== undefined) svc.durationMinutes = Number(durationMinutes);
+    if (isActive !== undefined) svc.isActive = !!isActive;
     storage.services.set(svc.id, svc);
     res.json(svc);
   });

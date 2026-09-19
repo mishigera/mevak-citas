@@ -34,10 +34,10 @@ describe("storage — seed inicial", () => {
         id: "u-viejo", name: "Admin de antes", email: "viejo@m.test", passwordHash: "h",
         role: "ADMIN", isActive: true, createdAt: "2026-01-01T00:00:00.000Z",
       }],
-      tokens: [{ id: "tok", key: "tok", value: { userId: "u-viejo", role: "OWNER" } }],
+      tokens: [{ id: "tok", key: "tok", value: { userId: "u-viejo", role: "ADMIN" } }],
     });
 
-    expect(storage.tokens.get("tok")).toEqual({ userId: "u-viejo", role: "OWNER" });
+    expect(storage.tokens.get("tok")).toMatchObject({ userId: "u-viejo", role: "OWNER" });
   });
 
   it("usa ADMIN_EMAIL del entorno cuando está definida", async () => {
@@ -190,7 +190,26 @@ describe("storage — tokens", () => {
       tokens: [{ id: "tok-viejo", key: "tok-viejo", value: { userId: "u1", role: "OWNER" } }],
     });
 
-    expect(storage.tokens.get("tok-viejo")).toEqual({ userId: "u1", role: "OWNER" });
+    expect(storage.tokens.get("tok-viejo")).toMatchObject({ userId: "u1", role: "OWNER" });
+  });
+
+  /** Los tokens anteriores a la caducidad no tenían fecha: se les pone la del arranque. */
+  it("fecha los tokens viejos al arrancar, en vez de echar a todo el mundo", async () => {
+    const storage = await freshStorage({
+      tokens: [{ id: "tok-viejo", key: "tok-viejo", value: { userId: "u1", role: "OWNER" } }],
+    });
+
+    const { issuedAt } = storage.tokens.get("tok-viejo")!;
+    expect(issuedAt).toBeDefined();
+    expect(Date.now() - new Date(issuedAt!).getTime()).toBeLessThan(60_000);
+  });
+
+  it("no toca la fecha de un token que ya la tenía", async () => {
+    const storage = await freshStorage({
+      tokens: [{ id: "t", key: "t", value: { userId: "u1", role: "OWNER", issuedAt: "2026-09-01T00:00:00.000Z" } }],
+    });
+
+    expect(storage.tokens.get("t")!.issuedAt).toBe("2026-09-01T00:00:00.000Z");
   });
 
   it("ignora filas de token corruptas sin reventar el arranque", async () => {
@@ -204,5 +223,40 @@ describe("storage — tokens", () => {
 
     expect(storage.tokens.size).toBe(1);
     expect(storage.tokens.get("ok")).toBeDefined();
+  });
+});
+
+describe("storage — contraseña inicial en producción", () => {
+  const ENTORNO = { ...process.env };
+  // `NODE_ENV` viene tipado como solo lectura; en un test hay que poder cambiarlo.
+  const entorno = process.env as Record<string, string | undefined>;
+  afterEach(() => {
+    process.env = { ...ENTORNO };
+  });
+
+  /** Deuda §3: todo despliegue arrancaba con `admin123`, publicada en el README. */
+  it("se niega a sembrar la primera cuenta sin ADMIN_PASSWORD", async () => {
+    entorno.NODE_ENV = "production";
+    delete process.env.ADMIN_PASSWORD;
+
+    await expect(freshStorage()).rejects.toThrow(/ADMIN_PASSWORD es obligatoria/);
+  });
+
+  it("con ADMIN_PASSWORD arranca normal", async () => {
+    entorno.NODE_ENV = "production";
+    process.env.ADMIN_PASSWORD = "una-de-verdad";
+
+    const storage = await freshStorage();
+    expect(storage.users.snapshotValues()).toHaveLength(1);
+  });
+
+  it("si ya hay usuarios, no la pide: solo sirve para el primer arranque", async () => {
+    entorno.NODE_ENV = "production";
+    delete process.env.ADMIN_PASSWORD;
+
+    const storage = await freshStorage({
+      users: [{ id: "u1", name: "D", email: "d@m.test", passwordHash: "h", role: "OWNER", isActive: true, createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+    expect(storage.users.snapshotValues()).toHaveLength(1);
   });
 });

@@ -164,6 +164,8 @@ export interface CenterHours {
 export interface AuthToken {
   userId: string;
   role: Role;
+  /** Cuándo se emitió. Sin esto un token era válido para siempre (deuda §2). */
+  issuedAt?: string;
 }
 
 class PersistentMap<T extends { id: string }> extends Map<string, T> {
@@ -337,12 +339,29 @@ class DbStorage {
     if (migrados) console.log(`Migrados ${migrados} pagos a concept: "CITA" (ADR-0006)`);
   }
 
+  /**
+   * Los tokens anteriores a la caducidad no tenían fecha. Se les pone la de hoy: así no
+   * se echa a nadie de golpe al desplegar, pero dejan de ser eternos.
+   */
+  private fecharTokensViejos() {
+    const ahora = new Date().toISOString();
+    this.tokens.forEach((session, token) => {
+      if (!session.issuedAt) this.tokens.set(token, { ...session, issuedAt: ahora });
+    });
+  }
+
   private async seedIfNeeded() {
     this.migrarAdminAOwner();
     this.migrarConceptoDePagos();
+    this.fecharTokensViejos();
 
     if (!this.users.size) {
       const defaultAdminEmail = process.env.ADMIN_EMAIL || "admin@mevakbeautycenter.com";
+      // En producción la contraseña inicial es obligatoria: el valor por defecto estaba
+      // publicado en el README y cualquier despliegue arrancaba con él (deuda §3).
+      if (process.env.NODE_ENV === "production" && !process.env.ADMIN_PASSWORD) {
+        throw new Error("ADMIN_PASSWORD es obligatoria en producción para crear la primera cuenta");
+      }
       const defaultAdminPassword = process.env.ADMIN_PASSWORD || "admin123";
       const adminHash = await bcrypt.hash(defaultAdminPassword, 10);
       const admin: User = {

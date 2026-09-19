@@ -917,3 +917,71 @@ describe("horario del centro", () => {
     expect(res.status).toBe(200);
   });
 });
+
+/** Deuda §32: `Object.assign(x, req.body)` dejaba que el cuerpo pisara el `id`. */
+describe("listas blancas al editar", () => {
+  it("un id en el cuerpo no mueve al cliente de clave", async () => {
+    const { app, storage, tokens } = await setup();
+    const antes = storage.clients.snapshotValues().length;
+
+    const res = await as(app, tokens.RECEPTION).patch("/api/clients/client-1", { id: "otro", fullName: "Nuevo" });
+
+    expect(res.body.id).toBe("client-1");
+    expect(res.body.fullName).toBe("Nuevo");
+    expect(storage.clients.get("otro")).toBeUndefined();
+    expect(storage.clients.snapshotValues()).toHaveLength(antes);
+  });
+
+  it("ignora campos que no son del cliente", async () => {
+    const { app, storage, tokens } = await setup();
+    await as(app, tokens.RECEPTION).patch("/api/clients/client-1", { createdAt: "1999-01-01", esVip: true });
+
+    const cliente = storage.clients.get("client-1") as unknown as Record<string, unknown>;
+    expect(cliente.createdAt).not.toBe("1999-01-01");
+    expect(cliente.esVip).toBeUndefined();
+  });
+
+  it("un servicio no cambia de id ni de tipo", async () => {
+    const { app, storage, tokens } = await setup({
+      services: [{ id: "s1", name: "Limpieza", type: "FACIAL", price: 500, isActive: true }],
+    });
+
+    const res = await as(app, tokens.OWNER).patch("/api/services/s1", { id: "s9", type: "LASER", price: 650 });
+
+    expect(res.body).toMatchObject({ id: "s1", type: "FACIAL", price: 650 });
+    expect(storage.services.get("s9")).toBeUndefined();
+  });
+
+  it("la duración de un servicio se puede editar", async () => {
+    const { app, tokens } = await setup({
+      services: [{ id: "s1", name: "Limpieza", type: "FACIAL", price: 500, isActive: true }],
+    });
+
+    const res = await as(app, tokens.OWNER).patch("/api/services/s1", { durationMinutes: "75" });
+
+    expect(res.body.durationMinutes).toBe(75);
+  });
+});
+
+describe("duración de los servicios", () => {
+  it("sin duración, 60 minutos", async () => {
+    const { app, tokens } = await setup();
+    const res = await as(app, tokens.OWNER).post("/api/services", { name: "X", type: "FACIAL", price: 100 });
+
+    expect(res.body.durationMinutes).toBe(60);
+  });
+
+  it("guarda la que se indique", async () => {
+    const { app, tokens } = await setup();
+    const res = await as(app, tokens.OWNER).post("/api/services", { name: "X", type: "FACIAL", price: 100, durationMinutes: 45 });
+
+    expect(res.body.durationMinutes).toBe(45);
+  });
+
+  it("400 con una duración que no tiene sentido", async () => {
+    const { app, tokens } = await setup();
+    const res = await as(app, tokens.OWNER).post("/api/services", { name: "X", type: "FACIAL", price: 100, durationMinutes: 0 });
+
+    expect(res.status).toBe(400);
+  });
+});
