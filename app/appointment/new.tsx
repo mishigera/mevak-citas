@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +14,7 @@ import { ahoraClave } from "@/lib/fecha";
 import { ApiError, apiRequest, getApiUrl, getAuthToken, getErrorMessage } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
+import { alerta } from "@/lib/alerta";
 
 function Label({ children }: { children: string }) {
   return <Text style={styles.label}>{children}</Text>;
@@ -179,11 +180,11 @@ export default function NewAppointmentScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
       if (isScheduleConflict) {
-        Alert.alert("Horario no disponible", message);
+        alerta("Horario no disponible", message);
         return;
       }
 
-      Alert.alert("Error", message);
+      alerta("Error", message);
     },
   });
 

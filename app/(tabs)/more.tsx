@@ -1,11 +1,12 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import { Radius, Space } from "@/constants/theme";
 import { useAuth } from "@/contexts/auth";
 import { useBreakpoint } from "@/lib/responsive";
+import { alerta } from "@/lib/alerta";
 import { ContentColumn, Screen, useScreenLayout } from "@/components/Screen";
 import { GlassCard } from "@/components/glass";
 import { PressableMotion, Stagger } from "@/components/motion";
@@ -92,7 +93,7 @@ export default function MoreScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert("Cerrar sesión", "¿Deseas cerrar tu sesión?", [
+    alerta("Cerrar sesión", "¿Deseas cerrar tu sesión?", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Cerrar sesión",

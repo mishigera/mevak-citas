@@ -8,7 +8,6 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
   Image,
 } from "react-native";
 import { Redirect, router } from "expo-router";
@@ -21,6 +20,7 @@ import { GlassSurface } from "@/components/glass";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { Entrar, PressableMotion, Stagger } from "@/components/motion";
 import * as Haptics from "expo-haptics";
+import { alerta } from "@/lib/alerta";
 
 export default function LoginScreen() {
   const { user, login } = useAuth();
@@ -34,7 +34,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Error", "Ingresa correo y contraseña");
+      alerta("Error", "Ingresa correo y contraseña");
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -45,9 +45,9 @@ export default function LoginScreen() {
     } catch (err: any) {
       const message = String(err?.message || "");
       if (message.includes("401") || message.toLowerCase().includes("credenciales incorrectas")) {
-        Alert.alert("Inicio de sesión", "Usuario o contraseña no válido");
+        alerta("Inicio de sesión", "Usuario o contraseña no válido");
       } else {
-        Alert.alert("Error", "No se pudo iniciar sesión. Intenta de nuevo.");
+        alerta("Error", "No se pudo iniciar sesión. Intenta de nuevo.");
       }
     } finally {
       setLoading(false);

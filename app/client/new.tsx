@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Alert } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Colors } from "@/constants/colors";
@@ -9,6 +9,7 @@ import { Stagger, PressableMotion } from "@/components/motion";
 import { BotonPrimario, CampoTexto } from "@/components/Formulario";
 import { apiRequest } from "@/lib/query-client";
 import * as Haptics from "expo-haptics";
+import { alerta } from "@/lib/alerta";
 
 export default function NewClientScreen() {
   const qc = useQueryClient();
@@ -44,14 +45,14 @@ export default function NewClientScreen() {
       qc.invalidateQueries({ queryKey: ["/api/clients"] });
       clearForm();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Cliente generado", `${data.fullName} se creó correctamente.`, [
+      alerta("Cliente generado", `${data.fullName} se creó correctamente.`, [
         {
           text: "Aceptar",
           onPress: () => router.replace("/(tabs)/clients"),
         },
       ]);
     },
-    onError: (err: Error) => Alert.alert("Error", `No se pudo generar el cliente. ${err.message}`),
+    onError: (err: Error) => alerta("Error", `No se pudo generar el cliente. ${err.message}`),
   });
 
   return (

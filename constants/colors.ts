@@ -45,6 +45,12 @@ const GLASS_SHADOW_CSS_STRONG = "rgba(140,84,104,0.26)";
 const SKELETON_BASE = "rgba(140,84,104,0.07)";
 const SKELETON_SHINE = "rgba(140,84,104,0.16)";
 
+// --- Mapa láser ------------------------------------------------------------
+// Una zona marcada es PRIMARY al 55% sobre blanco, pero opaca: con alfa, dos zonas que
+// se tocan (glúteos y muslo) se ven más oscuras donde se solapan.
+const LASER_ZONA = "#DDBAC6";
+const LASER_LINEA = PRIMARY_DARK;
+
 // --- Fondo ambiental --------------------------------------------------------
 // Sin esto el vidrio no tiene nada que refractar y un panel translúcido sobre
 // blanco es indistinguible de un panel blanco.
@@ -95,6 +101,10 @@ export const Colors = {
     shadowCssStrong: GLASS_SHADOW_CSS_STRONG,
     skeleton: SKELETON_BASE,
     skeletonShine: SKELETON_SHINE,
+  },
+  laser: {
+    zona: LASER_ZONA,
+    linea: LASER_LINEA,
   },
   ambient: {
     top: AMBIENT_TOP,

@@ -9,6 +9,7 @@ import { queryClient } from "@/lib/query-client";
 import { Motion } from "@/constants/motion";
 import { useFonts, Nunito_400Regular, Nunito_600SemiBold, Nunito_700Bold, Nunito_800ExtraBold } from "@expo-google-fonts/nunito";
 import { AuthProvider, useAuth } from "@/contexts/auth";
+import { DialogoAlerta } from "@/components/DialogoAlerta";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 SplashScreen.preventAutoHideAsync();
@@ -75,6 +76,8 @@ export default function RootLayout() {
             <GestureHandlerRootView style={{ flex: 1 }}>
               <KeyboardProvider>
                 <RootLayoutNav />
+                {/* Después de las pantallas, para pintarse encima de todas. */}
+                <DialogoAlerta />
               </KeyboardProvider>
             </GestureHandlerRootView>
           </AuthProvider>

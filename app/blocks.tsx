@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Alert } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,6 +16,7 @@ import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
+import { alerta } from "@/lib/alerta";
 
 function formatDateTime(iso: string) {
   const d = new Date(iso);
@@ -62,7 +63,7 @@ export default function BlocksScreen() {
       setReason("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   const deleteMutation = useMutation({
@@ -70,11 +71,11 @@ export default function BlocksScreen() {
       await apiRequest("DELETE", `/api/blocks/${id}`, undefined);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/blocks"] }); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   const handleDelete = (id: string) => {
-    Alert.alert("Eliminar bloqueo", "¿Confirmas eliminar este bloqueo?", [
+    alerta("Eliminar bloqueo", "¿Confirmas eliminar este bloqueo?", [
       { text: "Cancelar", style: "cancel" },
       { text: "Eliminar", style: "destructive", onPress: () => deleteMutation.mutate(id) },
     ]);

@@ -439,6 +439,24 @@ describe("catálogo de servicios y paquetes", () => {
     expect((await as(app, tokens.RECEPTION).get("/api/services")).body).toHaveLength(1);
   });
 
+  it("la dueña ve también los inactivos si los pide, para poder reactivarlos", async () => {
+    const { app, tokens } = await setup({
+      services: [aService({ id: "s1" }), aService({ id: "s2", isActive: false })],
+    });
+
+    expect((await as(app, tokens.OWNER).get("/api/services?includeInactive=1")).body).toHaveLength(2);
+    expect((await as(app, tokens.OWNER).get("/api/services")).body).toHaveLength(1);
+  });
+
+  it("los demás roles no ven los inactivos aunque los pidan", async () => {
+    const { app, tokens } = await setup({
+      services: [aService({ id: "s1" }), aService({ id: "s2", isActive: false })],
+    });
+
+    expect((await as(app, tokens.RECEPTION).get("/api/services?includeInactive=1")).body).toHaveLength(1);
+    expect((await as(app, tokens.FACIALIST).get("/api/services?includeInactive=1")).body).toHaveLength(1);
+  });
+
   it("editar un servicio permite desactivarlo (borrado lógico)", async () => {
     const { app, storage, tokens } = await setup({ services: [aService({ id: "s1" })] });
     const res = await as(app, tokens.OWNER).patch("/api/services/s1", { isActive: false, price: 999 });
@@ -453,16 +471,110 @@ describe("catálogo de servicios y paquetes", () => {
   });
 
   it("crea un paquete y lo marca como LASER", async () => {
-    const { app, tokens } = await setup();
-    const res = await as(app, tokens.OWNER).post("/api/packages", { name: "P6", totalSessions: "6", price: "6000" });
+    const { app, storage, tokens } = await setup();
+    const [axila] = storage.laserAreas.snapshotValues();
+    const res = await as(app, tokens.OWNER).post("/api/packages", {
+      name: "P6", totalSessions: "6", price: "6000", areaIds: [axila.id],
+    });
 
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ type: "LASER", totalSessions: 6, price: 6000, isActive: true });
+    expect(res.body).toMatchObject({ type: "LASER", totalSessions: 6, price: 6000, isActive: true, areaIds: [axila.id] });
   });
 
   it("400 si al paquete le faltan campos", async () => {
     const { app, tokens } = await setup();
     expect((await as(app, tokens.OWNER).post("/api/packages", { name: "P" })).status).toBe(400);
+  });
+});
+
+describe("áreas de un paquete", () => {
+  const nuevo = { name: "Cara", totalSessions: 10, price: 1000 };
+
+  it("un paquete sin áreas no se crea", async () => {
+    const { app, tokens } = await setup();
+
+    const sinCampo = await as(app, tokens.OWNER).post("/api/packages", nuevo);
+    const vacio = await as(app, tokens.OWNER).post("/api/packages", { ...nuevo, areaIds: [] });
+
+    expect(sinCampo.status).toBe(400);
+    expect(vacio.status).toBe(400);
+    expect(vacio.body.message).toMatch(/al menos un área/);
+  });
+
+  it("rechaza un área que no está en el catálogo", async () => {
+    const { app, storage, tokens } = await setup();
+    const [una] = storage.laserAreas.snapshotValues();
+
+    const res = await as(app, tokens.OWNER).post("/api/packages", { ...nuevo, areaIds: [una.id, "inventada"] });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("guarda cada área una sola vez", async () => {
+    const { app, storage, tokens } = await setup();
+    const [a, b] = storage.laserAreas.snapshotValues();
+
+    const res = await as(app, tokens.OWNER).post("/api/packages", { ...nuevo, areaIds: [a.id, b.id, a.id] });
+
+    expect(res.body.areaIds).toEqual([a.id, b.id]);
+  });
+
+  it("editar un paquete le cambia las áreas, el nombre y el precio", async () => {
+    const { app, storage, tokens } = await setup({ packages: [aPackage({ id: "pk1", name: "cara" })] });
+    const [a, b] = storage.laserAreas.snapshotValues();
+
+    const res = await as(app, tokens.OWNER).patch("/api/packages/pk1", { areaIds: [a.id, b.id], name: " Cara completa ", price: 1200 });
+
+    expect(res.status).toBe(200);
+    expect(storage.packages.get("pk1")).toMatchObject({ name: "Cara completa", price: 1200, areaIds: [a.id, b.id] });
+  });
+
+  it("un PATCH inválido no deja nada a medias", async () => {
+    const { app, storage, tokens } = await setup({ packages: [aPackage({ id: "pk1", name: "cara", price: 1000 })] });
+
+    const res = await as(app, tokens.OWNER).patch("/api/packages/pk1", { price: 1500, areaIds: [] });
+
+    expect(res.status).toBe(400);
+    expect(storage.packages.get("pk1")).toMatchObject({ name: "cara", price: 1000 });
+  });
+
+  it("rechaza sesiones y precio sin sentido, y un nombre vacío", async () => {
+    const { app, tokens } = await setup({ packages: [aPackage({ id: "pk1" })] });
+    const editar = (body: object) => as(app, tokens.OWNER).patch("/api/packages/pk1", body);
+
+    expect((await editar({ totalSessions: 0 })).status).toBe(400);
+    expect((await editar({ totalSessions: 2.5 })).status).toBe(400);
+    expect((await editar({ price: -1 })).status).toBe(400);
+    expect((await editar({ name: "  " })).status).toBe(400);
+  });
+
+  it("404 al editar un paquete que no existe", async () => {
+    const { app, tokens } = await setup();
+    expect((await as(app, tokens.OWNER).patch("/api/packages/nope", { price: 1 })).status).toBe(404);
+  });
+
+  it("vender un paquete suma sus áreas a las de la clienta, sin repetir", async () => {
+    const { app, storage, tokens } = await setup();
+    const [axila, bigote, frente] = storage.laserAreas.snapshotValues();
+    storage.packages.set("pk1", { ...aPackage({ id: "pk1" }), type: "LASER", areaIds: [axila.id, bigote.id] });
+    storage.clientLaserSelections.set("s1", { id: "s1", clientId: "client-1", areaId: axila.id });
+    storage.clientLaserSelections.set("s2", { id: "s2", clientId: "client-1", areaId: frente.id });
+
+    const res = await as(app, tokens.RECEPTION).post("/api/clients/client-1/packages", { packageId: "pk1" });
+
+    expect(res.status).toBe(201);
+    const areasDeLaClienta = storage.clientLaserSelections.snapshotValues()
+      .filter((s) => s.clientId === "client-1").map((s) => s.areaId);
+    expect(areasDeLaClienta.sort()).toEqual([axila.id, bigote.id, frente.id].sort());
+    expect(res.body.package.areaIds).toEqual([axila.id, bigote.id]);
+  });
+
+  it("vender un paquete viejo, sin áreas, no toca las de la clienta", async () => {
+    const { app, storage, tokens } = await setup({ packages: [aPackage({ id: "pk1" })] });
+
+    await as(app, tokens.RECEPTION).post("/api/clients/client-1/packages", { packageId: "pk1" });
+
+    expect(storage.clientLaserSelections.snapshotValues()).toHaveLength(0);
   });
 });
 

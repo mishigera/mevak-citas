@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, Alert } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Colors } from "@/constants/colors";
@@ -11,6 +11,7 @@ import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
+import { alerta } from "@/lib/alerta";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
@@ -38,7 +39,7 @@ export default function PendingPaymentsScreen() {
       refetch();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   const total = (pending || []).reduce((s, p) => s + p.facialistNetAmount, 0);
@@ -88,7 +89,7 @@ export default function PendingPaymentsScreen() {
                       style={styles.botonPagar}
                       disabled={markPaidMutation.isPending}
                       onPress={() => {
-                        Alert.alert("Confirmar pago", `¿Marcar como pagado a ${p.staff?.name}?`, [
+                        alerta("Confirmar pago", `¿Marcar como pagado a ${p.staff?.name}?`, [
                           { text: "Cancelar", style: "cancel" },
                           { text: "Confirmar", onPress: () => markPaidMutation.mutate(p.id) },
                         ]);

@@ -50,6 +50,8 @@ const CASOS: Caso[] = [
     body: { price: 200 } },
   { desc: "crear paquete", method: "post", path: "/api/packages", permitidos: ["OWNER"],
     body: { name: "P", totalSessions: 6, price: 600 } },
+  { desc: "editar paquete", method: "patch", path: "/api/packages/package-1", permitidos: ["OWNER"],
+    body: { price: 700 } },
 
   // Venta de paquetes: la dueña y recepción
   { desc: "vender paquete a cliente", method: "post", path: "/api/clients/client-1/packages",

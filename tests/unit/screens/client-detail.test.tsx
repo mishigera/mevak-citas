@@ -247,7 +247,8 @@ describe("pestaña Láser", () => {
     });
     fireEvent.press(screen.getByText("Láser"));
 
-    await waitFor(() => expect(screen.getByText(/Seleccionadas: Axila/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("1 área")).toBeTruthy());
+    expect(screen.getByLabelText("Axila").props.accessibilityState).toMatchObject({ selected: true });
   });
 
   it("avisa si no hay paquetes que vincular", async () => {
@@ -265,6 +266,61 @@ describe("pestaña Láser", () => {
 
     await waitFor(() => expect(screen.getByText("Axilas 6")).toBeTruthy());
     expect(screen.getByText("6 sesiones · $3000")).toBeTruthy();
+  });
+
+  it("al elegir un paquete para vender se ven sus áreas en el mapa", async () => {
+    await abrir("RECEPTION", {
+      "/api/packages": [fixtures.paquete({ id: "p1", name: "Axilas 6", areaIds: ["la1"] })],
+    });
+    fireEvent.press(screen.getByText("Láser"));
+    await waitFor(() => expect(screen.getByText("Axilas 6")).toBeTruthy());
+
+    expect(screen.queryByText("Áreas de Axilas 6")).toBeNull();
+    fireEvent.press(screen.getByText("Axilas 6"));
+
+    await waitFor(() => expect(screen.getByText("Áreas de Axilas 6")).toBeTruthy());
+    expect(screen.getByText("Axila")).toBeTruthy();
+  });
+
+  it("un paquete sin áreas lo dice en vez de enseñar un mapa vacío", async () => {
+    await abrir("OWNER", {
+      "/api/packages": [fixtures.paquete({ id: "p1", name: "Viejo" })],
+    });
+    fireEvent.press(screen.getByText("Láser"));
+    await waitFor(() => expect(screen.getByText("Viejo")).toBeTruthy());
+
+    fireEvent.press(screen.getByText("Viejo"));
+
+    await waitFor(() => expect(screen.getByText(/Este paquete no tiene áreas definidas/)).toBeTruthy());
+  });
+
+  it("al vender un paquete con áreas avisa de que se sumaron a la clienta", async () => {
+    await abrir("OWNER", {
+      "/api/packages": [fixtures.paquete({ id: "p1", name: "Axilas 6", areaIds: ["la1"] })],
+      "POST /api/clients/c1/packages": { id: "cp1" },
+    });
+    fireEvent.press(screen.getByText("Láser"));
+    await waitFor(() => expect(screen.getByText("Axilas 6")).toBeTruthy());
+
+    fireEvent.press(screen.getByText("Axilas 6"));
+    fireEvent.press(screen.getByText("Registrar venta del paquete"));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
+      "Paquete vendido", expect.stringContaining("Sus áreas se sumaron a las de la clienta."),
+    ));
+  });
+
+  it("la tarjeta de un paquete activo dice qué áreas cubre", async () => {
+    await abrir("OWNER", {
+      "/api/clients/c1/packages": [{
+        id: "cp1", clientId: "c1", packageId: "p1", status: "ACTIVE", startDate: "2026-09-01T10:00:00.000Z",
+        totalSessions: 8, usedSessions: 2, remainingSessions: 6,
+        package: { id: "p1", name: "Brazos 8", totalSessions: 8, price: 4000, areaIds: ["la2", "la1"] },
+      }],
+    });
+    fireEvent.press(screen.getByText("Láser"));
+
+    await waitFor(() => expect(screen.getByText("Brazos, Axila")).toBeTruthy());
   });
 
   it("a RECEPTION ni siquiera se le pinta el mapa de áreas", async () => {

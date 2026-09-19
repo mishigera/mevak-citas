@@ -6,7 +6,6 @@ import {
   ScrollView,
   Pressable,
   ActivityIndicator,
-  Alert,
   TextInput,
   Linking,
 } from "react-native";
@@ -26,6 +25,7 @@ import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
 import { LaserBodyMap } from "@/components/LaserBodyMap";
 import { enlaceRecordatorio } from "@/lib/whatsapp";
+import { alerta } from "@/lib/alerta";
 
 /**
  * Referencia estable para los `useQuery` sin datos todavía.
@@ -79,6 +79,12 @@ function authHeaders() {
 }
 
 export default function AppointmentDetailScreen() {
+  // Fuera del React Compiler. La beta que usamos (19.0.0-beta-ebf51a3) ve que después
+  // de las guardas de carga se lee `appt.x` sin `?.`, concluye que `appt` nunca es nulo
+  // y convierte `appt?.services` en la dependencia `appt.services`, que se evalúa al
+  // renderizar: mientras la cita carga, `appt` es `undefined` y la pantalla truena.
+  // Pasaba al abrir cualquier cita. Deuda §38.
+  "use no memo";
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
   const { user, isOwner } = useAuth();
@@ -181,7 +187,7 @@ export default function AppointmentDetailScreen() {
       await apiRequest("PATCH", `/api/appointments/${id}`, { status });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/appointments"] }); refetch(); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   const updateNotesMutation = useMutation({
@@ -210,7 +216,7 @@ export default function AppointmentDetailScreen() {
       });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/appointments"] }); refetch(); setShowPaymentForm(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   const anularPagoMutation = useMutation({
@@ -224,11 +230,11 @@ export default function AppointmentDetailScreen() {
       setPaymentAmount("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: (err: Error) => Alert.alert("No se pudo anular", getErrorMessage(err, "No se pudo anular el pago")),
+    onError: (err: Error) => alerta("No se pudo anular", getErrorMessage(err, "No se pudo anular el pago")),
   });
 
   const confirmarAnulacion = (paymentId: string) => {
-    Alert.alert(
+    alerta(
       "Anular pago",
       "El cobro se borra, la cita vuelve a \"Llegó\" y, si gastó una sesión de paquete, se devuelve.",
       [
@@ -257,7 +263,7 @@ export default function AppointmentDetailScreen() {
       setShowLaserPowerModal(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   /**
@@ -283,11 +289,11 @@ export default function AppointmentDetailScreen() {
       hora: formatTime(appt.dateTimeStart),
     });
     if (!enlace) {
-      Alert.alert("Sin teléfono válido", "La ficha de la clienta no tiene un teléfono al que escribir.");
+      alerta("Sin teléfono válido", "La ficha de la clienta no tiene un teléfono al que escribir.");
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Linking.openURL(enlace).catch(() => Alert.alert("Error", "No se pudo abrir WhatsApp."));
+    Linking.openURL(enlace).catch(() => alerta("Error", "No se pudo abrir WhatsApp."));
   };
 
   const handleReSchedule = () => {
@@ -305,7 +311,7 @@ export default function AppointmentDetailScreen() {
     const doChange = () => {
       updateStatusMutation.mutate(nextStatus, {
         onSuccess: () => {
-          Alert.alert(
+          alerta(
             nextStatus === "NO_SHOW" ? "No llegó" : "Cita cancelada",
             "¿Deseas reagendar esta cita?",
             [
@@ -324,7 +330,7 @@ export default function AppointmentDetailScreen() {
         ? "¿La clienta no llegó?"
         : "¿Confirmas cancelar esta cita?";
 
-    Alert.alert(title, message, [
+    alerta(title, message, [
       { text: "Cancelar", style: "cancel" },
       { text: "Confirmar", style: "destructive", onPress: doChange },
     ]);
@@ -582,7 +588,7 @@ export default function AppointmentDetailScreen() {
                 areas={laserAreas}
                 selectedSvgKeys={selectedAreaSvgKeys}
                 readOnly
-                title={isDone ? "Snapshot de áreas depiladas" : "Referencia rápida para depilación"}
+                title={isDone ? "Áreas tratadas en esta sesión" : "Áreas a tratar"}
               />
             </SectionCard>
           )}

@@ -5,7 +5,7 @@
  * esto el servidor rechaza lo que cae fuera, y aquí se decide qué es "fuera".
  */
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Switch, Alert } from "react-native";
+import { View, Text, StyleSheet, Switch } from "react-native";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Colors } from "@/constants/colors";
@@ -19,6 +19,7 @@ import { CargandoLista } from "@/components/Estados";
 import { apiRequest, getApiUrl, getAuthToken, getErrorMessage } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
+import { alerta } from "@/lib/alerta";
 
 type Dia = { weekday: number; open: boolean; opensAt: string; closesAt: string };
 
@@ -52,9 +53,9 @@ export default function HorarioScreen() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/center-hours"] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Horario guardado", "Las citas fuera de este horario se rechazan al agendar.");
+      alerta("Horario guardado", "Las citas fuera de este horario se rechazan al agendar.");
     },
-    onError: (err: Error) => Alert.alert("Error", getErrorMessage(err, "No se pudo guardar el horario")),
+    onError: (err: Error) => alerta("Error", getErrorMessage(err, "No se pudo guardar el horario")),
   });
 
   const cambiar = (weekday: number, cambios: Partial<Dia>) =>

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Alert } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,6 +13,7 @@ import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
+import { alerta } from "@/lib/alerta";
 
 const ROLES = ["OWNER", "RECEPTION", "FACIALIST"] as const;
 const ROLE_LABELS: Record<string, string> = { OWNER: "Dueña/Laserista", RECEPTION: "Recepcionista", FACIALIST: "Facialista" };
@@ -47,7 +48,7 @@ export default function UsersScreen() {
       setShowForm(false); setName(""); setEmail(""); setPassword("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   const toggleMutation = useMutation({
@@ -55,7 +56,7 @@ export default function UsersScreen() {
       await apiRequest("PATCH", `/api/users/${id}`, { isActive });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/users"] }),
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   const updatePasswordMutation = useMutation({
@@ -67,9 +68,9 @@ export default function UsersScreen() {
       setEditingPasswordUserId(null);
       setNewPassword("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Éxito", "Contraseña actualizada");
+      alerta("Éxito", "Contraseña actualizada");
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   return (

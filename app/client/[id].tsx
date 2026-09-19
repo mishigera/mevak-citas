@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Alert,
   TextInput,
   Switch,
 } from "react-native";
@@ -23,6 +22,7 @@ import { fetch } from "expo/fetch";
 import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
 import { LaserBodyMap } from "@/components/LaserBodyMap";
+import { alerta } from "@/lib/alerta";
 
 /**
  * Referencia estable para los `useQuery` sin datos todavía.
@@ -149,9 +149,10 @@ export default function ClientDetailScreen() {
     },
   });
 
+  // Recepción también: al vender un paquete ve en el mapa qué áreas cubre.
   const { data: laserAreas = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/laser-areas"],
-    enabled: role === "OWNER",
+    enabled: role === "OWNER" || role === "RECEPTION",
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/laser-areas", base);
@@ -198,7 +199,7 @@ export default function ClientDetailScreen() {
       setClinicalEditing(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   useEffect(() => {
@@ -226,8 +227,14 @@ export default function ClientDetailScreen() {
       qc.invalidateQueries({ queryKey: ["/api/appointments"] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
+
+  const paqueteElegido = packageCatalog.find((p: any) => p.id === selectedPackageTemplateId);
+  const svgKeysDe = (areaIds: string[] | undefined) =>
+    (areaIds ?? []).map((areaId) => laserAreas.find((a: any) => a.id === areaId)?.svgKey).filter(Boolean) as string[];
+  const nombresDe = (areaIds: string[] | undefined) =>
+    (areaIds ?? []).map((areaId) => laserAreas.find((a: any) => a.id === areaId)?.name).filter(Boolean) as string[];
 
   const linkPackageMutation = useMutation({
     mutationFn: async () => {
@@ -238,14 +245,21 @@ export default function ClientDetailScreen() {
       });
     },
     onSuccess: () => {
+      const conAreas = (paqueteElegido?.areaIds ?? []).length > 0;
       qc.invalidateQueries({ queryKey: ["/api/clients", id, "packages"] });
+      // Vender suma las áreas del paquete a las de la clienta.
+      qc.invalidateQueries({ queryKey: ["/api/clients", id, "laser-areas"] });
       qc.invalidateQueries({ queryKey: ["/api/appointments"] });
       qc.invalidateQueries({ queryKey: ["/api/reports/income"] });
       setSelectedPackageTemplateId("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Paquete vendido", "Quedó registrado en el historial de la clienta y en el corte del día.");
+      alerta(
+        "Paquete vendido",
+        "Quedó registrado en el historial de la clienta y en el corte del día." +
+          (conAreas ? " Sus áreas se sumaron a las de la clienta." : ""),
+      );
     },
-    onError: (err: Error) => Alert.alert("Error", err.message),
+    onError: (err: Error) => alerta("Error", err.message),
   });
 
   const toggleLaserArea = (svgKey: string) => {
@@ -398,6 +412,20 @@ export default function ClientDetailScreen() {
                     );
                   })}
                 </View>
+                {paqueteElegido && (
+                  (paqueteElegido.areaIds ?? []).length > 0 ? (
+                    <View style={styles.paqueteAreas}>
+                      <LaserBodyMap
+                        areas={laserAreas}
+                        selectedSvgKeys={svgKeysDe(paqueteElegido.areaIds)}
+                        readOnly
+                        title={`Áreas de ${paqueteElegido.name}`}
+                      />
+                    </View>
+                  ) : (
+                    <Text style={styles.emptyText}>Este paquete no tiene áreas definidas. Se eligen en Más → Paquetes.</Text>
+                  )
+                )}
                 <Text style={styles.metodoEtiqueta}>¿Cómo lo paga?</Text>
                 <View style={styles.metodoFila}>
                   {([
@@ -453,6 +481,9 @@ export default function ClientDetailScreen() {
               <View style={[styles.progressFill, { width: `${(cp.usedSessions / cp.totalSessions) * 100}%` as any }]} />
             </View>
             <Text style={styles.packageUsageText}>Usadas: {cp.usedSessions} · Restantes: {cp.remainingSessions}</Text>
+            {nombresDe(cp.package?.areaIds).length > 0 && (
+              <Text style={styles.packageAreasText}>{nombresDe(cp.package?.areaIds).join(", ")}</Text>
+            )}
             <Text style={styles.progressDate}>Inicio: {formatDate(cp.startDate)}</Text>
           </View>
         ))}
@@ -768,6 +799,8 @@ const styles = StyleSheet.create({
   progressBar: { height: 8, backgroundColor: Colors.border, borderRadius: 4, overflow: "hidden" },
   progressFill: { height: 8, backgroundColor: Colors.secondary, borderRadius: 4 },
   packageUsageText: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary },
+  packageAreasText: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.primaryDark, marginTop: 4 },
+  paqueteAreas: { marginTop: 4, marginBottom: 4 },
   progressDate: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
   metodoEtiqueta: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary, marginTop: 10 },
   metodoFila: { flexDirection: "row", gap: 8, marginTop: 6 },

@@ -68,14 +68,6 @@ jest.mock("expo-splash-screen", () => ({
   hideAsync: jest.fn(async () => {}),
 }));
 
-// react-toastify: varias pantallas avisan por toast.
-jest.mock("react-toastify", () => ({
-  toast: Object.assign(jest.fn(), {
-    success: jest.fn(), error: jest.fn(), info: jest.fn(), warn: jest.fn(),
-  }),
-  ToastContainer: () => null,
-}));
-
 // `alert` global: en RN web existe, en el entorno de test no.
 if (typeof globalThis.alert !== "function") {
   globalThis.alert = jest.fn();

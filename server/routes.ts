@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "node:http";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "crypto";
-import { storage, type Role, type AppointmentStatus, type PaymentMethod, type ClientPackage } from "./storage";
+import { storage, type Role, type AppointmentStatus, type PaymentMethod, type ClientPackage, type Package } from "./storage";
 
 declare global {
   namespace Express {
@@ -105,9 +105,21 @@ function enrichClientPackage(clientPackage: ClientPackage | null | undefined) {
           name: pkg.name,
           totalSessions: pkg.totalSessions,
           price: pkg.price,
+          areaIds: pkg.areaIds ?? [],
         }
       : null,
   };
+}
+
+/**
+ * Las áreas de un paquete, sin repetir, o `null` si no valen: hace falta al menos una y
+ * todas tienen que ser áreas láser activas del catálogo.
+ */
+function areasDePaquete(valor: unknown): string[] | null {
+  if (!Array.isArray(valor) || valor.length === 0) return null;
+  const ids = Array.from(new Set(valor));
+  const todasValen = ids.every((id) => typeof id === "string" && storage.laserAreas.get(id)?.isActive);
+  return todasValen ? (ids as string[]) : null;
 }
 
 /**
@@ -464,13 +476,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
     storage.payments.set(payment.id, payment);
 
+    // Las áreas del paquete pasan a ser de la clienta, sin quitarle ninguna que ya
+    // tuviera. La cita láser pinta las áreas de la clienta: así ya salen sin marcarlas.
+    const yaTiene = new Set(
+      Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === clientId).map((s) => s.areaId),
+    );
+    for (const areaId of pkg.areaIds ?? []) {
+      if (yaTiene.has(areaId)) continue;
+      const sel = { id: randomUUID(), clientId, areaId };
+      storage.clientLaserSelections.set(sel.id, sel);
+    }
+
     res.status(201).json({ ...enrichClientPackage(cp), payment });
   });
 
   // SERVICES
   app.get("/api/services", requireAuth, (req, res) => {
-    const { type } = req.query;
-    let services = Array.from(storage.services.values()).filter((s) => s.isActive);
+    const { type, includeInactive } = req.query;
+    // Al agendar solo se ofrecen los activos. La pantalla de Servicios pide también los
+    // desactivados: si no, desactivar uno lo borraba de la vista y no había cómo volver.
+    const todos = includeInactive === "1" && req.userRole === "OWNER";
+    let services = Array.from(storage.services.values()).filter((s) => todos || s.isActive);
     if (type) services = services.filter((s) => s.type === type);
     res.json(services);
   });
@@ -507,9 +533,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/packages", requireRole("OWNER"), (req, res) => {
     const { name, totalSessions, price } = req.body;
     if (!name || !totalSessions || price === undefined) return res.status(400).json({ message: "Faltan campos" });
-    const pkg = { id: randomUUID(), name, type: "LASER" as const, totalSessions: Number(totalSessions), price: Number(price), isActive: true };
+    const areaIds = areasDePaquete(req.body.areaIds);
+    if (!areaIds) return res.status(400).json({ message: "Elige al menos un área del paquete" });
+    const pkg = { id: randomUUID(), name, type: "LASER" as const, totalSessions: Number(totalSessions), price: Number(price), isActive: true, areaIds };
     storage.packages.set(pkg.id, pkg);
     res.status(201).json(pkg);
+  });
+
+  app.patch("/api/packages/:id", requireRole("OWNER"), (req, res) => {
+    const pkg = storage.packages.get(paramId(req));
+    if (!pkg) return res.status(404).json({ message: "Paquete no encontrado" });
+    // Todo se valida antes de tocar nada: `pkg` es el objeto del Map, y un 400 a medio
+    // camino dejaría en memoria un cambio que nunca se guarda.
+    const { name, totalSessions, price, areaIds, isActive } = req.body;
+    const cambios: Partial<Package> = {};
+    if (name !== undefined) {
+      if (!String(name).trim()) return res.status(400).json({ message: "El nombre no puede quedar vacío" });
+      cambios.name = String(name).trim();
+    }
+    if (totalSessions !== undefined) {
+      const n = Number(totalSessions);
+      if (!Number.isInteger(n) || n <= 0) return res.status(400).json({ message: "Número de sesiones inválido" });
+      cambios.totalSessions = n;
+    }
+    if (price !== undefined) {
+      const n = Number(price);
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ message: "Precio inválido" });
+      cambios.price = n;
+    }
+    if (areaIds !== undefined) {
+      const validas = areasDePaquete(areaIds);
+      if (!validas) return res.status(400).json({ message: "Elige al menos un área del paquete" });
+      cambios.areaIds = validas;
+    }
+    if (isActive !== undefined) cambios.isActive = !!isActive;
+    const actualizado = { ...pkg, ...cambios };
+    storage.packages.set(pkg.id, actualizado);
+    res.json(actualizado);
   });
 
   // APPOINTMENTS

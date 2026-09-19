@@ -61,6 +61,8 @@ export interface Package {
   totalSessions: number;
   price: number;
   isActive: boolean;
+  /** Las áreas láser que cubre. Opcional: los paquetes de antes de p006 no tienen. */
+  areaIds?: string[];
 }
 
 export interface LaserArea {

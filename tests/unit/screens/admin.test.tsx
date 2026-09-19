@@ -194,45 +194,62 @@ describe("catálogo de paquetes", () => {
     expect(screen.getByText("Nuevo paquete")).toBeTruthy();
   });
 
-  it("no deja guardar con el formulario incompleto", async () => {
-    mockApi({ "/api/packages": [] });
+  const areasLaser = [
+    fixtures.area({ id: "la1", name: "Axila", svgKey: "axila" }),
+    fixtures.area({ id: "la2", name: "Bigote", svgKey: "bigote" }),
+  ];
+
+  async function abrirNuevo(rutas: Record<string, unknown> = {}) {
+    mockApi({ "/api/packages": [], "/api/laser-areas": areasLaser, ...rutas });
     renderScreen(<PackagesScreen />);
     await waitFor(() => expect(screen.getByText("Paquetes láser")).toBeTruthy());
     pressIcon("add");
+    await waitFor(() => expect(screen.getByLabelText("Axila")).toBeTruthy());
+  }
+
+  function rellenar(nombre = "P", sesiones = "1", precio = "1") {
+    fireEvent.changeText(screen.getByPlaceholderText("Nombre del paquete"), nombre);
+    fireEvent.changeText(screen.getByPlaceholderText("Total de sesiones"), sesiones);
+    fireEvent.changeText(screen.getByPlaceholderText("Precio ($)"), precio);
+  }
+
+  it("no deja guardar con el formulario incompleto", async () => {
+    await abrirNuevo();
 
     fireEvent.changeText(screen.getByPlaceholderText("Nombre del paquete"), "Solo el nombre");
-    fireEvent.press(screen.getByText("Guardar"));
+    fireEvent.press(screen.getByText("Crear paquete"));
 
     await waitFor(() => expect(apiCalls().filter((c) => c.method === "POST")).toHaveLength(0));
   });
 
-  it("crea el paquete con los números convertidos", async () => {
-    mockApi({ "/api/packages": [], "POST /api/packages": { id: "nuevo" } });
-    renderScreen(<PackagesScreen />);
-    await waitFor(() => expect(screen.getByText("Paquetes láser")).toBeTruthy());
-    pressIcon("add");
+  it("no deja crear un paquete sin áreas", async () => {
+    await abrirNuevo();
 
-    fireEvent.changeText(screen.getByPlaceholderText("Nombre del paquete"), "  Piernas 8  ");
-    fireEvent.changeText(screen.getByPlaceholderText("Total de sesiones"), "8");
-    fireEvent.changeText(screen.getByPlaceholderText("Precio ($)"), "7200");
-    fireEvent.press(screen.getByText("Guardar"));
+    rellenar("Cara", "10", "1000");
+    fireEvent.press(screen.getByText("Crear paquete"));
+
+    await waitFor(() => expect(apiCalls().filter((c) => c.method === "POST")).toHaveLength(0));
+  });
+
+  it("crea el paquete con los números convertidos y las áreas elegidas", async () => {
+    await abrirNuevo({ "POST /api/packages": { id: "nuevo" } });
+
+    rellenar("  Piernas 8  ", "8", "7200");
+    fireEvent.press(screen.getByLabelText("Axila"));
+    fireEvent.press(screen.getByText("Crear paquete"));
 
     await waitFor(() => {
       const post = apiCalls().find((c) => c.method === "POST");
-      expect(post?.body).toEqual({ name: "Piernas 8", totalSessions: 8, price: 7200 });
+      expect(post?.body).toEqual({ name: "Piernas 8", totalSessions: 8, price: 7200, areaIds: ["la1"] });
     });
   });
 
   it("cierra el formulario tras crear", async () => {
-    mockApi({ "/api/packages": [], "POST /api/packages": { id: "nuevo" } });
-    renderScreen(<PackagesScreen />);
-    await waitFor(() => expect(screen.getByText("Paquetes láser")).toBeTruthy());
-    pressIcon("add");
+    await abrirNuevo({ "POST /api/packages": { id: "nuevo" } });
 
-    fireEvent.changeText(screen.getByPlaceholderText("Nombre del paquete"), "P");
-    fireEvent.changeText(screen.getByPlaceholderText("Total de sesiones"), "1");
-    fireEvent.changeText(screen.getByPlaceholderText("Precio ($)"), "1");
-    fireEvent.press(screen.getByText("Guardar"));
+    rellenar();
+    fireEvent.press(screen.getByLabelText("Axila"));
+    fireEvent.press(screen.getByText("Crear paquete"));
 
     // Primero se confirma que la petición salió; cerrar el formulario ocurre después,
     // y sin este paso intermedio el waitFor puede agotarse bajo carga.
@@ -241,20 +258,53 @@ describe("catálogo de paquetes", () => {
   });
 
   it("avisa si el servidor rechaza la creación", async () => {
+    await abrirNuevo({ "POST /api/packages": { __status: 400, message: "Faltan campos" } });
+
+    rellenar();
+    fireEvent.press(screen.getByLabelText("Axila"));
+    fireEvent.press(screen.getByText("Crear paquete"));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith("No se pudo guardar el paquete", "Faltan campos"));
+  });
+
+  it("cada paquete dice qué áreas cubre, o que no tiene", async () => {
     mockApi({
-      "/api/packages": [],
-      "POST /api/packages": { __status: 400, message: "Faltan campos" },
+      "/api/laser-areas": areasLaser,
+      "/api/packages": [
+        fixtures.paquete({ id: "p1", name: "Cara", areaIds: ["la2", "la1"] }),
+        fixtures.paquete({ id: "p2", name: "Viejo" }),
+      ],
     });
     renderScreen(<PackagesScreen />);
-    await waitFor(() => expect(screen.getByText("Paquetes láser")).toBeTruthy());
-    pressIcon("add");
 
-    fireEvent.changeText(screen.getByPlaceholderText("Nombre del paquete"), "P");
-    fireEvent.changeText(screen.getByPlaceholderText("Total de sesiones"), "1");
-    fireEvent.changeText(screen.getByPlaceholderText("Precio ($)"), "1");
-    fireEvent.press(screen.getByText("Guardar"));
+    await waitFor(() => expect(screen.getByText("Bigote, Axila")).toBeTruthy());
+    expect(screen.getByText("Sin áreas: tócalo para elegirlas")).toBeTruthy();
+  });
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith("Error", "Faltan campos"));
+  it("tocar un paquete lo abre con sus áreas y guarda los cambios", async () => {
+    mockApi({
+      "/api/laser-areas": areasLaser,
+      "/api/packages": [fixtures.paquete({ id: "p1", name: "Cara", totalSessions: 10, price: 1000, areaIds: ["la1"] })],
+      "PATCH /api/packages/p1": { id: "p1" },
+    });
+    renderScreen(<PackagesScreen />);
+    await waitFor(() => expect(screen.getByLabelText("Editar Cara")).toBeTruthy());
+
+    fireEvent.press(screen.getByLabelText("Editar Cara"));
+
+    expect(screen.getByText("Editar paquete")).toBeTruthy();
+    expect(screen.getByDisplayValue("Cara")).toBeTruthy();
+    expect(screen.getByLabelText("Axila").props.accessibilityState).toMatchObject({ selected: true });
+
+    fireEvent.press(screen.getByLabelText("Cara"));
+    fireEvent.press(screen.getByLabelText("Bigote"));
+    fireEvent.press(screen.getByText("Guardar cambios"));
+
+    await waitFor(() => {
+      const patch = apiCalls().find((c) => c.method === "PATCH");
+      expect(patch?.path).toBe("/api/packages/p1");
+      expect(patch?.body).toEqual({ name: "Cara", totalSessions: 10, price: 1000, areaIds: ["la1", "la2"] });
+    });
   });
 
   it("aguanta una lista vacía", async () => {
@@ -296,19 +346,47 @@ describe("catálogo de servicios", () => {
     });
   });
 
-  it("permite desactivar un servicio sin borrarlo", async () => {
+  it("pide también los desactivados", async () => {
+    mockApi({ "/api/services": servicios });
+    renderScreen(<ServicesScreen />);
+
+    await waitFor(() => expect(screen.getByText("Limpieza facial")).toBeTruthy());
+    const get = apiCalls().find((c) => c.method === "GET" && c.path === "/api/services");
+    expect(get?.search).toBe("?includeInactive=1");
+  });
+
+  it("el ojo desactiva un servicio sin borrarlo", async () => {
     mockApi({ "/api/services": servicios, "PATCH /api/services/s1": { id: "s1" } });
     renderScreen(<ServicesScreen />);
     await waitFor(() => expect(screen.getByText("Limpieza facial")).toBeTruthy());
 
-    const interruptores = screen.UNSAFE_queryAllByProps({ accessibilityRole: "switch" });
-    if (interruptores.length) {
-      fireEvent(interruptores[0], "valueChange", false);
-      await waitFor(() => {
-        const patch = apiCalls().find((c) => c.method === "PATCH");
-        expect(patch?.body).toEqual({ isActive: false });
-      });
-    }
+    fireEvent.press(screen.getAllByLabelText("Desactivar servicio")[0]);
+
+    await waitFor(() => {
+      const patch = apiCalls().find((c) => c.method === "PATCH");
+      expect(patch?.path).toBe("/api/services/s1");
+      expect(patch?.body).toEqual({ isActive: false });
+    });
+  });
+
+  // Visto por el usuario: tocó el ojo, el servicio desapareció de la lista y ya no había
+  // forma de recuperarlo.
+  it("un servicio desactivado sigue en la lista y se puede reactivar", async () => {
+    mockApi({
+      "/api/services": [fixtures.servicio({ id: "s1", name: "Dermapen", isActive: false })],
+      "PATCH /api/services/s1": { id: "s1" },
+    });
+    renderScreen(<ServicesScreen />);
+
+    await waitFor(() => expect(screen.getByText("Dermapen")).toBeTruthy());
+    expect(screen.getByText("Desactivado · no se ofrece al agendar")).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText("Activar servicio"));
+
+    await waitFor(() => {
+      const patch = apiCalls().find((c) => c.method === "PATCH");
+      expect(patch?.body).toEqual({ isActive: true });
+    });
   });
 });
 
@@ -353,26 +431,15 @@ describe("pagos pendientes a facialistas", () => {
     expect(screen.getByText(/750/)).toBeTruthy();
   });
 
-  it("pide confirmación antes de liquidar", async () => {
+  // Contestar al diálogo y ver el PATCH está en `flujos-dialogo.test.tsx`.
+  it("pide confirmación antes de liquidar y sin ella no liquida", async () => {
     mockApi({ "/api/payments/pending-facialist": [pendiente()] });
     renderScreen(<PaymentsScreen />);
     await waitFor(() => expect(screen.getByText("Lucía")).toBeTruthy());
 
-    const botones = screen.UNSAFE_queryAllByProps({ accessibilityRole: "button" });
-    const liquidar = botones.find((b) => typeof b.props.onPress === "function" && b.props.onPress.length === 0);
-    if (liquidar) {
-      fireEvent.press(liquidar);
-      await waitFor(() =>
-        expect(alertSpy.mock.calls.some(([t]) => /confirmar pago/i.test(String(t)))).toBe(true),
-      );
-    }
-  });
+    fireEvent.press(screen.getByLabelText("Pagar a Lucía"));
 
-  it("no liquida nada sin confirmar", async () => {
-    mockApi({ "/api/payments/pending-facialist": [pendiente()] });
-    renderScreen(<PaymentsScreen />);
-    await waitFor(() => expect(screen.getByText("Lucía")).toBeTruthy());
-
+    expect(alertSpy).toHaveBeenCalledWith("Confirmar pago", "¿Marcar como pagado a Lucía?", expect.any(Array));
     expect(apiCalls().filter((c) => c.method === "PATCH")).toHaveLength(0);
   });
 });

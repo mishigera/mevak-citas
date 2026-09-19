@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Platform } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,10 +10,9 @@ import { GlassCard, GlassIconButton, GlassSegmented } from "@/components/glass";
 import { PressableMotion, Stagger } from "@/components/motion";
 import { BotonPrimario, CampoTexto, PanelFormulario } from "@/components/Formulario";
 import { CargandoLista, EstadoVacio } from "@/components/Estados";
-import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
-import { fetch } from "expo/fetch";
+import { apiRequest } from "@/lib/query-client";
+import { alerta } from "@/lib/alerta";
 import * as Haptics from "expo-haptics";
-import { toast, ToastContainer } from "react-toastify";
 
 export default function ServicesScreen() {
   const qc = useQueryClient();
@@ -23,14 +22,12 @@ export default function ServicesScreen() {
   const [price, setPrice] = useState("");
   const [duracion, setDuracion] = useState("60");
 
+  // Con los desactivados: si no, al tocar el ojo el servicio desaparecía de esta lista y
+  // no quedaba forma de volver a activarlo. La clave cuelga de "/api/services" para que
+  // las invalidaciones de siempre la alcancen.
   const { data: services, isLoading } = useQuery<any[]>({
-    queryKey: ["/api/services"],
-    queryFn: async () => {
-      const base = getApiUrl();
-      const url = new URL("/api/services", base);
-      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${getAuthToken() || ""}` } });
-      return res.json() as Promise<any[]>;
-    },
+    queryKey: ["/api/services", "todos"],
+    queryFn: async () => (await apiRequest("GET", "/api/services?includeInactive=1")).json(),
   });
 
   const createMutation = useMutation({
@@ -40,20 +37,13 @@ export default function ServicesScreen() {
       });
     },
     onSuccess: () => {
-      console.log("Service created successfully");
       qc.invalidateQueries({ queryKey: ["/api/services"] });
       setShowForm(false);
       setName(""); setPrice("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      
-        toast.success("Servicio creado correctamente");
-      
+      alerta("Servicio creado");
     },
-    onError: (err: Error) =>{
-      if (Platform.OS === "web") {
-        toast.error(err.message || "Ocurrió un error al crear el servicio");
-      }
-  }
+    onError: (err: Error) => alerta("No se pudo crear el servicio", err.message),
   });
 
   const toggleMutation = useMutation({
@@ -118,6 +108,7 @@ export default function ServicesScreen() {
                   <View
                     style={[
                       styles.tipo,
+                      !svc.isActive && styles.apagado,
                       { backgroundColor: (svc.type === "LASER" ? Colors.secondary : Colors.accent) + "20" },
                     ]}
                   >
@@ -130,10 +121,13 @@ export default function ServicesScreen() {
                       {svc.type}
                     </Text>
                   </View>
-                  <View style={styles.info}>
+                  <View style={[styles.info, !svc.isActive && styles.apagado]}>
                     <Text style={styles.nombre}>{svc.name}</Text>
                     <Text style={styles.precio}>${svc.price}</Text>
                     <Text style={styles.duracion}>{svc.durationMinutes ?? 60} min</Text>
+                    {!svc.isActive && (
+                      <Text style={styles.inactivo}>Desactivado · no se ofrece al agendar</Text>
+                    )}
                   </View>
                   <PressableMotion
                     gesto="escala"
@@ -153,19 +147,6 @@ export default function ServicesScreen() {
           </Stagger>
         )}
       </ScreenScroll>
-
-      {Platform.OS === "web" && (
-        <ToastContainer
-          position="top-right"
-          autoClose={2500}
-          pauseOnFocusLoss={false}
-          newestOnTop
-          closeOnClick
-          pauseOnHover
-          draggable
-          theme="light"
-        />
-      )}
     </Screen>
   );
 }
@@ -180,4 +161,6 @@ const styles = StyleSheet.create({
   nombre: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.text },
   precio: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.primary },
   duracion: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
+  apagado: { opacity: 0.5 },
+  inactivo: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textMuted, marginTop: 2 },
 });
