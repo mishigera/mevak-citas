@@ -881,6 +881,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
+   * Lo que lleva ganado la facialista, solo lo suyo (plan p008).
+   *
+   * Hasta ahora no podía ver nada de dinero: ni lo del día ni lo que le falta por
+   * liquidar. Son sus pagos los de las citas en las que ella es la profesional; los días
+   * son locales (ADR-0004) y la semana va de lunes a domingo. La dueña también pasa,
+   * como en todas las rutas (invariante de `routes.permissions.test.ts`), y ve lo suyo;
+   * el inicio solo se lo enseña a la facialista.
+   */
+  app.get("/api/payments/mine", requireRole("OWNER", "FACIALIST"), (req, res) => {
+    const ahora = new Date();
+    const hoy = diaLocalDe(ahora.toISOString());
+    const lunes = new Date(ahora);
+    lunes.setDate(ahora.getDate() - ((ahora.getDay() + 6) % 7));
+    const inicioSemana = diaLocalDe(lunes.toISOString());
+
+    const mios = Array.from(storage.payments.values()).filter((p) => {
+      const cita = p.appointmentId ? storage.appointments.get(p.appointmentId) : null;
+      return p.facialistNetAmount > 0 && cita?.staffId === req.userId;
+    });
+    const suma = (lista: typeof mios) => lista.reduce((acc, p) => acc + p.facialistNetAmount, 0);
+    const deHoy = mios.filter((p) => diaLocalDe(p.createdAt) === hoy);
+
+    res.json({
+      hoy: suma(deHoy),
+      cobrosHoy: deHoy.length,
+      semana: suma(mios.filter((p) => { const dia = diaLocalDe(p.createdAt); return dia >= inicioSemana && dia <= hoy; })),
+      pendiente: suma(mios.filter((p) => !p.facialistPaidFlag)),
+    });
+  });
+
+  /**
    * Ingresos de un mes o de un día.
    *
    * Desglosa por método y por concepto porque el corte de caja al cerrar necesita las

@@ -1201,3 +1201,65 @@ describe("paquetes para reagendar", () => {
     expect(res.body.map((p: { id: string }) => p.id)).toEqual(["de-eva", "de-ana"]);
   });
 });
+
+// Plan p008: la facialista ve lo suyo en el inicio.
+describe("lo que lleva ganado la facialista", () => {
+  // Jueves 17 de septiembre de 2026 a las 18:00, hora local. La semana empezó el lunes 14.
+  const AHORA = new Date(2026, 8, 17, 18, 0);
+  const local = (dia: number, hora: number, min = 0) => new Date(2026, 8, dia, hora, min).toISOString();
+
+  beforeEach(() => jest.useFakeTimers({ now: AHORA, doNotFake: ["nextTick", "setImmediate"] }));
+  afterEach(() => jest.useRealTimers());
+
+  const pago = (id: string, cita: string, createdAt: string, over: Record<string, unknown> = {}) => ({
+    id, appointmentId: cita, concept: "CITA", method: "CASH", totalAmount: 1000, ownerNetAmount: 500,
+    facialistNetAmount: 500, facialistPaidFlag: false, createdAt, ...over,
+  });
+
+  async function conPagos(payments: unknown[]) {
+    return setup({
+      appointments: [
+        anAppointment({ id: "mia", staffId: "u-FACIALIST" }),
+        anAppointment({ id: "mia-2", staffId: "u-FACIALIST" }),
+        anAppointment({ id: "de-la-duena", staffId: "u-OWNER" }),
+      ],
+      payments,
+    });
+  }
+
+  it("lo de hoy, lo de la semana y lo que falta por liquidarle", async () => {
+    const { app, tokens } = await conPagos([
+      pago("hoy", "mia", local(17, 11)),
+      pago("hoy-liquidado", "mia-2", local(17, 12), { facialistNetAmount: 300, facialistPaidFlag: true }),
+      pago("lunes", "mia", local(14, 10), { facialistNetAmount: 200 }),
+      pago("domingo-pasado", "mia", local(13, 10), { facialistNetAmount: 700, facialistPaidFlag: true }),
+    ]);
+
+    const res = await as(app, tokens.FACIALIST).get("/api/payments/mine");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ hoy: 800, cobrosHoy: 2, semana: 1000, pendiente: 700 });
+  });
+
+  it("solo lo de sus citas: lo de la dueña y las ventas de paquete no son suyos", async () => {
+    const { app, tokens } = await conPagos([
+      pago("de-la-duena", "de-la-duena", local(17, 11)),
+      pago("paquete", undefined as unknown as string, local(17, 11), { concept: "PAQUETE", appointmentId: undefined }),
+      pago("laser", "mia", local(17, 11), { facialistNetAmount: 0 }),
+    ]);
+
+    const res = await as(app, tokens.FACIALIST).get("/api/payments/mine");
+
+    expect(res.body).toEqual({ hoy: 0, cobrosHoy: 0, semana: 0, pendiente: 0 });
+  });
+
+  // ADR-0004: `createdAt` va en UTC. A las 23:30 del jueves en México ya es viernes en UTC.
+  it("un cobro de las 23:30 cuenta para ese día, no para el siguiente", async () => {
+    jest.setSystemTime(new Date(2026, 8, 17, 23, 45));
+    const { app, tokens } = await conPagos([pago("noche", "mia", local(17, 23, 30))]);
+
+    const res = await as(app, tokens.FACIALIST).get("/api/payments/mine");
+
+    expect(res.body.hoy).toBe(500);
+  });
+});

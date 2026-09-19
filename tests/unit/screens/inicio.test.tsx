@@ -85,6 +85,7 @@ function api(rutas: Record<string, unknown> = {}) {
     "/api/payments/pending-facialist": [],
     "/api/reports/income": CAJA,
     "/api/client-packages/idle": [],
+    "/api/payments/mine": { hoy: 800, cobrosHoy: 2, semana: 1000, pendiente: 700 },
     ...Object.fromEntries(Object.entries(rutas).filter(([ruta]) => ruta !== "/api/appointments")),
   });
 }
@@ -649,5 +650,37 @@ describe("para reagendar", () => {
     await waitFor(() => expect(screen.getByText("Sofía Ruiz")).toBeTruthy());
     expect(screen.queryByTestId("inicio-reagendar")).toBeNull();
     expect(apiCalls().map((c) => c.path)).not.toContain("/api/client-packages/idle");
+  });
+});
+
+describe("lo que lleva la facialista", () => {
+  it("lo de hoy, lo de la semana y lo que falta por liquidarle", async () => {
+    entrar("FACIALIST", "u2");
+    api();
+    await abrir();
+
+    const suyo = await waitFor(() => within(screen.getByTestId("inicio-lo-que-llevas")));
+    expect(suyo.getByLabelText("Hoy: $800")).toBeTruthy();
+    expect(suyo.getByText("2 cobros")).toBeTruthy();
+    expect(suyo.getByLabelText("Esta semana: $1,000")).toBeTruthy();
+    expect(suyo.getByLabelText("Por liquidarte: $700")).toBeTruthy();
+  });
+
+  it("sale aunque hoy no tenga citas", async () => {
+    entrar("FACIALIST", "u2");
+    api({ "/api/appointments": [] });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByTestId("inicio-lo-que-llevas")).toBeTruthy());
+  });
+
+  it.each([["OWNER", "u1"], ["RECEPTION", "u-recepcion"]] as const)("%s ni lo ve ni lo pide", async (rol, id) => {
+    entrar(rol, id);
+    api();
+    await abrir();
+
+    await waitFor(() => expect(screen.getByText("Ana López")).toBeTruthy());
+    expect(screen.queryByTestId("inicio-lo-que-llevas")).toBeNull();
+    expect(apiCalls().map((c) => c.path)).not.toContain("/api/payments/mine");
   });
 });

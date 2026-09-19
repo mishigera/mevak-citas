@@ -69,6 +69,10 @@ const CASOS: Caso[] = [
   { desc: "ver reporte de ingresos", method: "get", path: "/api/reports/income",
     permitidos: ["OWNER"] },
 
+  // Inicio (p008): lo que lleva ganado cada una. Recepción no ve dinero.
+  { desc: "ver lo que lleva ganado", method: "get", path: "/api/payments/mine",
+    permitidos: ["OWNER", "FACIALIST"] },
+
   // Inicio (p008): las sesiones pagadas sin agendar son para quien agenda.
   { desc: "ver paquetes para reagendar", method: "get", path: "/api/client-packages/idle",
     permitidos: ["OWNER", "RECEPTION"] },

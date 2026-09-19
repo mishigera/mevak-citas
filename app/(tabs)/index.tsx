@@ -12,7 +12,7 @@
  * |------------------|----------------|----------------|------------|
  * | Ahora/siguiente  | todo el centro | todo el centro | las suyas  |
  * | Por atender      | + liquidar     | sin dinero     | lo suyo    |
- * | Hoy              | + lo cobrado   | sin dinero     | lo suyo    |
+ * | Hoy              | + lo cobrado   | sin dinero     | + lo suyo  |
  * | Huecos           | todas          | todas          | los suyos  |
  * | Confirmar mañana | sí             | sí             | —          |
  * | Para reagendar   | sí             | sí             | —          |
@@ -44,6 +44,7 @@ import { AhoraYSiguiente } from "@/components/inicio/AhoraYSiguiente";
 import { ConfirmarManana } from "@/components/inicio/ConfirmarManana";
 import { Cumpleanos } from "@/components/inicio/Cumpleanos";
 import { HuecosHoy } from "@/components/inicio/HuecosHoy";
+import { LoQueLlevas, type MisGanancias } from "@/components/inicio/LoQueLlevas";
 import { ParaReagendar, type PaqueteSinAgendar } from "@/components/inicio/ParaReagendar";
 import { PorAtender, avisosPorAtender } from "@/components/inicio/PorAtender";
 import { ResumenHoy, type CajaDia } from "@/components/inicio/ResumenHoy";
@@ -121,6 +122,12 @@ export default function HomeScreen() {
     enabled: !!user && isOwner,
     refetchInterval: intervalo,
   });
+  const misGananciasQ = useQuery<MisGanancias>({
+    queryKey: ["/api/payments/mine"],
+    queryFn: () => pedir("/api/payments/mine"),
+    enabled: !!user && esFacialista,
+    refetchInterval: intervalo,
+  });
   const horarioQ = useQuery<HorarioDia[]>({
     queryKey: ["/api/center-hours"],
     queryFn: () => pedir("/api/center-hours"),
@@ -192,7 +199,7 @@ export default function HomeScreen() {
     () => Promise.all(
       [
         ["/api/appointments", hoy], ["/api/blocks"], ["/api/payments/pending-facialist"],
-        ["/api/reports/income", `date=${hoy}`], ["/api/client-packages/idle"],
+        ["/api/reports/income", `date=${hoy}`], ["/api/client-packages/idle"], ["/api/payments/mine"],
       ].map((queryKey) => qc.refetchQueries({ queryKey, type: "active" })),
     ),
     [qc, hoy],
@@ -316,7 +323,9 @@ export default function HomeScreen() {
         resumen={resumen}
         caja={isOwner ? cajaQ.data : undefined}
         onVerCorte={isOwner ? () => router.push("/admin/reports") : undefined}
-      />
+      >
+        {esFacialista && misGananciasQ.data && <LoQueLlevas datos={misGananciasQ.data} />}
+      </ResumenHoy>
       <HuecosHoy huecos={huecos} verNombre={!esFacialista} onElegir={agendarEnHueco} />
     </>
   );
