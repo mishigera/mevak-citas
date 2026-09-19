@@ -10,8 +10,8 @@
  * lista. El valor que sale sigue siendo `"YYYY-MM-DD"` y `"HH:MM"`, que es lo que ya
  * esperan las pantallas y el servidor.
  */
-import React, { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useMemo, useRef, useState } from "react";
+import { ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import { Radius, Space } from "@/constants/theme";
@@ -62,17 +62,24 @@ function Disparador({
     >
       <GlassSurface radius={Radius.tile} style={estilos.fila}>
         <Ionicons name={icono} size={16} color={Colors.primary} />
-        <Text style={estilos.valor}>{valor}</Text>
+        <Text style={estilos.valor} numberOfLines={1}>{valor}</Text>
         <Ionicons name="chevron-down" size={15} color={Colors.textMuted} />
       </GlassSurface>
     </PressableMotion>
   );
 }
 
-function textoFecha(clave: string): string {
+/** Por debajo de este ancho la fecha va abreviada: "Hoy, 18 sep" en vez de la larga. */
+const ANCHO_FECHA_CORTA = 240;
+
+function textoFecha(clave: string, corta = false): string {
   const d = desdeClave(clave);
   if (Number.isNaN(d.getTime())) return clave;
   const hoy = clave === ahoraClave();
+  if (corta) {
+    const cuerpo = `${d.getDate()} ${MESES[d.getMonth()].slice(0, 3)}`;
+    return hoy ? `Hoy, ${cuerpo}` : `${DIAS[d.getDay()]} ${cuerpo}`;
+  }
   const cuerpo = `${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
   return hoy ? `Hoy, ${cuerpo}` : cuerpo;
 }
@@ -91,6 +98,8 @@ export function CampoFecha({
   testID?: string;
 }) {
   const [abierto, setAbierto] = useState(false);
+  const [angosto, setAngosto] = useState(false);
+  const refAncla = useRef<View | null>(null);
   const [mesVisible, setMesVisible] = useState(() => {
     const d = desdeClave(value || ahoraClave());
     return Number.isNaN(d.getTime()) ? desdeClave(ahoraClave()) : d;
@@ -120,9 +129,14 @@ export function CampoFecha({
   return (
     <View style={[estilos.contenedor, style]} testID={testID}>
       {!!etiqueta && <Etiqueta>{etiqueta}</Etiqueta>}
-      <View style={estilos.ancla}>
+      <View
+        ref={refAncla}
+        style={estilos.ancla}
+        // Para acortar la fecha cuando el campo va en media columna (Bloqueos).
+        onLayout={(e: LayoutChangeEvent) => setAngosto(e.nativeEvent.layout.width < ANCHO_FECHA_CORTA)}
+      >
         <Disparador
-          valor={value ? textoFecha(value) : "Elegir fecha"}
+          valor={value ? textoFecha(value, angosto) : "Elegir fecha"}
           icono="calendar-outline"
           accessibilityLabel={etiqueta || "Elegir fecha"}
           abierto={abierto}
@@ -134,6 +148,9 @@ export function CampoFecha({
           titulo="Elegir fecha"
           origen="arriba-izquierda"
           diametroOrigen={52}
+          anclaRef={refAncla}
+          // Siete columnas de días no caben en media columna: el calendario pide su sitio.
+          anchoMinimo={300}
           style={estilos.panelFecha}
         >
           <View style={estilos.panelInterior}>
@@ -198,6 +215,8 @@ export function CampoHora({
   testID?: string;
 }) {
   const [abierto, setAbierto] = useState(false);
+  const refAncla = useRef<View | null>(null);
+  const refLista = useRef<ScrollView | null>(null);
 
   const horas = useMemo(() => {
     const salida: string[] = [];
@@ -212,7 +231,7 @@ export function CampoHora({
   return (
     <View style={[estilos.contenedor, style]} testID={testID}>
       {!!etiqueta && <Etiqueta>{etiqueta}</Etiqueta>}
-      <View style={estilos.ancla}>
+      <View ref={refAncla} style={estilos.ancla}>
         <Disparador
           valor={value || "Elegir hora"}
           icono="time-outline"
@@ -226,26 +245,38 @@ export function CampoHora({
           titulo={etiqueta || "Elegir hora"}
           origen="arriba-izquierda"
           diametroOrigen={52}
+          anclaRef={refAncla}
           style={estilos.panelHora}
         >
-          <ScrollView style={estilos.listaHoras} showsVerticalScrollIndicator={false}>
+          <ScrollView ref={refLista} style={estilos.listaHoras} showsVerticalScrollIndicator={false}>
             <View style={estilos.listaInterior}>
               {horas.map((h) => {
                 const elegida = h === value;
                 return (
-                  <PressableMotion
+                  <View
                     key={h}
-                    gesto="sutil"
-                    accessibilityLabel={h}
-                    accessibilityState={{ selected: elegida }}
-                    style={[estilos.opcionHora, elegida && estilos.opcionHoraElegida]}
-                    onPress={() => {
-                      onChange(h);
-                      setAbierto(false);
-                    }}
+                    // La lista abre en la hora elegida y no en las 07:00: son 57 opciones
+                    // y quien agenda lo hace veinte veces al día.
+                    onLayout={
+                      elegida
+                        ? (e: LayoutChangeEvent) =>
+                            refLista.current?.scrollTo({ y: Math.max(e.nativeEvent.layout.y - 60, 0), animated: false })
+                        : undefined
+                    }
                   >
-                    <Text style={[estilos.opcionHoraTexto, elegida && estilos.opcionHoraTextoElegida]}>{h}</Text>
-                  </PressableMotion>
+                    <PressableMotion
+                      gesto="sutil"
+                      accessibilityLabel={h}
+                      accessibilityState={{ selected: elegida }}
+                      style={[estilos.opcionHora, elegida && estilos.opcionHoraElegida]}
+                      onPress={() => {
+                        onChange(h);
+                        setAbierto(false);
+                      }}
+                    >
+                      <Text style={[estilos.opcionHoraTexto, elegida && estilos.opcionHoraTextoElegida]}>{h}</Text>
+                    </PressableMotion>
+                  </View>
                 );
               })}
             </View>
@@ -274,8 +305,10 @@ const estilos = StyleSheet.create({
   },
   valor: { flex: 1, fontFamily: "Nunito_600SemiBold", fontSize: 15, color: Colors.text },
 
-  panelFecha: { top: 54, left: 0, right: 0, maxHeight: 360 },
-  panelHora: { top: 54, left: 0, right: 0, maxHeight: 280 },
+  // En web el panel se coloca solo pegado al campo (`anclaRef`); `top/left/right` solo
+  // valen para nativo, donde no hay portal.
+  panelFecha: { top: 54, left: 0, right: 0, maxHeight: 380 },
+  panelHora: { top: 54, left: 0, right: 0, maxHeight: 300 },
   panelInterior: { paddingHorizontal: Space.md, paddingBottom: Space.md, gap: Space.sm },
 
   navMes: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

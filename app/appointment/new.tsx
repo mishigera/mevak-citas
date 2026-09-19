@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Alert } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -40,8 +40,9 @@ function Selector({
   titulo: string;
   children: React.ReactNode;
 }) {
+  const refAncla = useRef<View | null>(null);
   return (
-    <View style={styles.ancla}>
+    <View ref={refAncla} style={styles.ancla}>
       <PressableMotion
         gesto="sutil"
         accessibilityLabel={value || `Seleccionar ${label}`}
@@ -63,6 +64,7 @@ function Selector({
         titulo={titulo}
         origen="arriba-izquierda"
         diametroOrigen={52}
+        anclaRef={refAncla}
         style={styles.panelSelector}
       >
         {children}

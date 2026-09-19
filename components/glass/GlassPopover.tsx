@@ -23,6 +23,20 @@
  *
  * En nativo no hay `clip-path`: el panel escala desde el mismo origen con
  * `transformOrigin` y el mismo resorte. Las pantallas no notan la diferencia.
+ *
+ * ## Paneles anclados a un campo (`anclaRef`)
+ *
+ * Un panel que se despliega bajo un campo de formulario **no puede vivir dentro del
+ * campo** en web: react-native-web pone `z-index: 0` en toda `View`, cada una crea su
+ * contexto de apilado, y los campos que vienen después se pintan encima del panel por
+ * mucho `zIndex` que lleve. El fondo que cierra al tocar fuera sufría lo mismo: solo
+ * cubría la caja del campo, así que tocar otro campo abría un segundo panel sin cerrar
+ * el primero.
+ *
+ * Con `anclaRef`, en web el panel y su fondo salen a `document.body` (`Portal`) con
+ * `position: fixed`, y la posición se calcula desde el rectángulo del campo: debajo si
+ * cabe, encima si no. Se recalcula al hacer scroll, al cambiar el tamaño y, mientras
+ * está abierto, cada 150 ms por si la maquetación se mueve sola.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -43,6 +57,7 @@ import { Blur, GlassShadow, Radius, Space } from "@/constants/theme";
 import { Curva, EasingNativo, Motion, ResorteNativo } from "@/constants/motion";
 import { animacionesEnVivo, curvaResorte, estiloWeb, ms, usaCSS, useMotionPreferences } from "@/lib/motion";
 import { PressableMotion } from "@/components/motion/PressableMotion";
+import { Portal } from "./Portal";
 
 /** La esquina de la que nace el panel; es donde está el botón que lo abre. */
 export type OrigenPopover = "arriba-derecha" | "arriba-izquierda" | "abajo-derecha" | "abajo-izquierda" | "centro";
@@ -60,7 +75,18 @@ export type GlassPopoverProps = {
   conFondo?: boolean;
   /** Se le devuelve el foco al cerrar (normalmente, el botón que abrió el panel). */
   refOrigen?: React.RefObject<{ focus?: () => void } | null>;
-  /** Posición y ancho de la capa. Lo pone quien lo usa. */
+  /**
+   * El campo del que cuelga el panel. Con él, en web el panel sale del árbol y se coloca
+   * solo, pegado al campo (ver la cabecera). Sin él, la posición la da `style`.
+   */
+  anclaRef?: React.RefObject<View | null>;
+  /**
+   * Ancho mínimo del panel anclado. Por defecto mide lo que el campo; un calendario en
+   * un campo de media columna quedaría apretado. Si es más ancho que el campo, se alinea
+   * con el borde del campo más cercano al centro de la ventana.
+   */
+  anchoMinimo?: number;
+  /** Posición y ancho de la capa. Lo pone quien lo usa. Con `anclaRef`, solo cuenta `maxHeight`. */
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
   testID?: string;
@@ -117,6 +143,75 @@ function recorteCerrado(
   return `inset(${arriba}px ${derecha}px ${abajo}px ${izquierda}px round ${r}px)`;
 }
 
+/** El rectángulo del campo en coordenadas de la ventana, como da `getBoundingClientRect`. */
+export type RectAncla = { top: number; bottom: number; left: number; width: number };
+
+/** Hueco entre el campo y el panel. */
+const SEPARACION = 6;
+/** Lo que se deja libre contra el borde de la ventana. */
+const MARGEN_VENTANA = 12;
+/** Cada cuánto se vuelve a medir el campo con el panel abierto. */
+const INTERVALO_MEDIDA = 150;
+
+/**
+ * Dónde va un panel anclado: debajo del campo si cabe, encima si no.
+ *
+ * Si no cabe en ninguno de los dos lados, va al que tenga más sitio y se recorta su alto
+ * a lo que haya; el contenido de los paneles ya va en un `ScrollView`.
+ */
+export function posicionAnclada(
+  rect: RectAncla,
+  altoVentana: number,
+  altoPanel: number,
+  altoMaximo = Infinity,
+  anchoMinimo = 0,
+  anchoVentana = Infinity,
+): {
+  top?: number;
+  bottom?: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  origen: OrigenPopover;
+} {
+  const libreAbajo = altoVentana - rect.bottom - SEPARACION - MARGEN_VENTANA;
+  const libreArriba = rect.top - SEPARACION - MARGEN_VENTANA;
+  const alto = Math.min(altoPanel || altoMaximo, altoMaximo);
+  const abajo = alto <= libreAbajo || libreAbajo >= libreArriba;
+
+  // Más ancho que el campo: se pega al borde del campo que mira al centro de la ventana,
+  // y el panel nace de esa esquina. Un campo de la columna derecha abre hacia la izquierda.
+  const width = Math.min(Math.max(rect.width, anchoMinimo), anchoVentana - 2 * MARGEN_VENTANA);
+  const haciaLaIzquierda = width > rect.width && rect.left + rect.width / 2 > anchoVentana / 2;
+  const leftDeseado = haciaLaIzquierda ? rect.left + rect.width - width : rect.left;
+  const left = Math.min(Math.max(leftDeseado, MARGEN_VENTANA), anchoVentana - width - MARGEN_VENTANA);
+  const lado = haciaLaIzquierda ? "derecha" : "izquierda";
+
+  return abajo
+    ? {
+        top: rect.bottom + SEPARACION,
+        left,
+        width,
+        maxHeight: Math.max(Math.min(altoMaximo, libreAbajo), 0),
+        origen: `arriba-${lado}`,
+      }
+    : {
+        bottom: altoVentana - rect.top + SEPARACION,
+        left,
+        width,
+        maxHeight: Math.max(Math.min(altoMaximo, libreArriba), 0),
+        origen: `abajo-${lado}`,
+      };
+}
+
+/** El rectángulo de una `View` en web. En nativo no hay DOM y devuelve `null`. */
+function medirAncla(ref: React.RefObject<View | null> | undefined): RectAncla | null {
+  const nodo = ref?.current as unknown as { getBoundingClientRect?: () => DOMRect } | null;
+  const r = nodo?.getBoundingClientRect?.();
+  if (!r) return null;
+  return { top: r.top, bottom: r.bottom, left: r.left, width: r.width };
+}
+
 export function GlassPopover({
   visible,
   onClose,
@@ -126,6 +221,8 @@ export function GlassPopover({
   radius = Radius.panel,
   conFondo = true,
   refOrigen,
+  anclaRef,
+  anchoMinimo,
   style,
   children,
   testID,
@@ -204,6 +301,47 @@ export function GlassPopover({
     if (visible) onClose();
   }, [ruta, visible, onClose]);
 
+  // Panel anclado: se mide el campo al abrir y cada vez que algo lo mueve.
+  //
+  // Scroll y resize no bastan: la maquetación también se mueve sola —la entrada animada
+  // de un formulario recién abierto, el teclado del teléfono— y el panel se quedaba donde
+  // estaba el campo al abrir. Por eso, además, se vuelve a medir cada 150 ms mientras está
+  // abierto. Con `setTimeout` y no con `requestAnimationFrame`: rAF se detiene en una
+  // pestaña oculta y el panel no se recolocaba. Medir es un `getBoundingClientRect` y
+  // solo se vuelve a pintar si el rectángulo ha cambiado de verdad.
+  //
+  // El scroll se escucha en captura porque el de un `ScrollView` no burbujea a `window`.
+  const anclado = usaCSS && !!anclaRef;
+  const [rectAncla, setRectAncla] = useState<RectAncla | null>(null);
+  useEffect(() => {
+    if (!anclado || !visible) return;
+    const win = globalThis as unknown as {
+      addEventListener?: Window["addEventListener"];
+      removeEventListener?: Window["removeEventListener"];
+    };
+    const medir = () => {
+      const nuevo = medirAncla(anclaRef);
+      setRectAncla((previo) =>
+        previo && nuevo &&
+        Math.abs(previo.top - nuevo.top) < 0.5 &&
+        Math.abs(previo.bottom - nuevo.bottom) < 0.5 &&
+        Math.abs(previo.left - nuevo.left) < 0.5 &&
+        Math.abs(previo.width - nuevo.width) < 0.5
+          ? previo
+          : nuevo,
+      );
+    };
+    medir();
+    const intervalo = setInterval(medir, INTERVALO_MEDIDA);
+    win.addEventListener?.("scroll", medir, true);
+    win.addEventListener?.("resize", medir);
+    return () => {
+      clearInterval(intervalo);
+      win.removeEventListener?.("scroll", medir, true);
+      win.removeEventListener?.("resize", medir);
+    };
+  }, [anclado, visible, anclaRef]);
+
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
     setMedida((prev) =>
@@ -244,9 +382,25 @@ export function GlassPopover({
   // --- Rama de CSS (web) ---------------------------------------------------
 
   if (usaCSS) {
+    const ventana = globalThis as { innerHeight?: number; innerWidth?: number };
+    const altoVentana = ventana.innerHeight ?? 800;
+    const anchoVentana = ventana.innerWidth ?? Infinity;
+    const maxDelLlamador = (StyleSheet.flatten(style) as ViewStyle | undefined)?.maxHeight;
+    const posicion = anclado && rectAncla
+      ? posicionAnclada(
+          rectAncla,
+          altoVentana,
+          medida.height,
+          typeof maxDelLlamador === "number" ? maxDelLlamador : Infinity,
+          anchoMinimo,
+          anchoVentana,
+        )
+      : null;
+    // Si se abre hacia arriba, el círculo del que nace está abajo.
+    const origenEfectivo = posicion?.origen ?? origen;
     const medido = medida.width > 0 && medida.height > 0;
     const cerrado = medido
-      ? recorteCerrado(origen, medida, diametroOrigen)
+      ? recorteCerrado(origenEfectivo, medida, diametroOrigen)
       : `inset(0px 0px 0px 0px round ${radius}px)`;
     const abiertoCss = `inset(0px 0px 0px 0px round ${radius}px)`;
     // Con movimiento reducido no hay recorte que animar: el panel solo aparece. Aquí
@@ -261,13 +415,34 @@ export function GlassPopover({
       transitionTimingFunction: abierto ? curvaResorte() : Curva.simetrica,
     });
 
-    return (
+    // Anclado, del `style` de quien lo usa no se hereda NADA de posición: ese `style`
+    // trae `top/left/right` para nativo, y en un array de estilos un `undefined` no pisa
+    // un valor anterior. Con `top: 54` heredado y `bottom` calculado, el panel que se
+    // abría hacia arriba se quedaba clavado arriba con un hueco hasta el campo. El alto
+    // máximo de quien lo usa ya va dentro de `posicion.maxHeight`.
+    const capaAnclada = anclado
+      ? [
+          estilos.capaAnclada,
+          posicion
+            ? estiloWeb({
+                top: posicion.top ?? "auto",
+                bottom: posicion.bottom ?? "auto",
+                left: posicion.left,
+                right: "auto",
+                width: posicion.width,
+                maxHeight: posicion.maxHeight,
+              })
+            : null,
+        ]
+      : null;
+
+    const arbol = (
       <>
         {conFondo && visible && (
           <Pressable
             accessibilityLabel="Cerrar panel"
             onPress={onClose}
-            style={estilos.fondo}
+            style={anclado ? estilos.fondoPantalla : estilos.fondo}
           />
         )}
         <View
@@ -275,8 +450,10 @@ export function GlassPopover({
           pointerEvents={visible ? "auto" : "none"}
           style={[
             estilos.capa,
-            style,
-            estiloWeb({ visibility: abierto ? "visible" : "hidden" }),
+            capaAnclada ?? style,
+            // Anclado y sin medir todavía: invisible, para no pintarlo un fotograma en
+            // la esquina de la ventana.
+            estiloWeb({ visibility: abierto && (!anclado || posicion) ? "visible" : "hidden" }),
             movimientoReducido
               ? estiloWeb({
                   opacity: abierto ? 1 : 0,
@@ -295,7 +472,7 @@ export function GlassPopover({
               estiloWeb({
                 opacity: abierto ? 1 : 0,
                 transform: abierto ? [{ scale: 1 }] : [{ scaleX: 0.13 }, { scaleY: 0.1 }],
-                transformOrigin: ORIGENES[origen].css,
+                transformOrigin: ORIGENES[origenEfectivo].css,
                 transitionProperty: "transform, opacity",
                 transitionDuration: ms(abierto ? Motion.panelAbrir : Motion.panelCerrar),
                 transitionTimingFunction: abierto ? curvaResorte() : Curva.simetrica,
@@ -335,6 +512,8 @@ export function GlassPopover({
         </View>
       </>
     );
+
+    return anclado ? <Portal>{arbol}</Portal> : arbol;
   }
 
   // --- Rama nativa ---------------------------------------------------------
@@ -388,6 +567,10 @@ export function GlassPopover({
 const estilos = StyleSheet.create({
   fondo: { ...StyleSheet.absoluteFillObject, zIndex: 40 },
   capa: { position: "absolute", zIndex: 41 },
+  // Anclado: fuera del árbol y contra la ventana, por encima de la cabecera y la barra
+  // de pestañas, que también flotan.
+  fondoPantalla: estiloWeb({ position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 1000 }),
+  capaAnclada: estiloWeb({ position: "fixed", zIndex: 1001 }),
   panel: {
     overflow: "hidden",
     zIndex: 0,

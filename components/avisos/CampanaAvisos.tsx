@@ -210,6 +210,11 @@ export function CampanaAvisos() {
         origen="arriba-derecha"
         diametroOrigen={DIAMETRO}
         refOrigen={refCampana}
+        // Anclado a la campana: en el teléfono el panel se salía por la izquierda, la
+        // tira de días de Inicio se pintaba encima y tocar fuera no lo cerraba. Mismo
+        // fallo y mismo arreglo que los campos de formulario (ver `GlassPopover`).
+        anclaRef={refCampana}
+        anchoMinimo={anchoPanel}
         testID="panel-avisos"
         style={[estilos.panel, { width: anchoPanel }]}
       >
