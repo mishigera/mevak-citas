@@ -177,7 +177,8 @@ export const fixtures = {
     type: "FACIAL", status: "SCHEDULED", ...over,
   }),
   servicio: (over: Record<string, unknown> = {}) => ({
-    id: "s1", name: "Limpieza facial", type: "FACIAL", price: 500, isActive: true, ...over,
+    id: "s1", name: "Limpieza facial", type: "FACIAL",
+    price: 500, durationMinutes: 60, isActive: true, ...over,
   }),
   paquete: (over: Record<string, unknown> = {}) => ({
     id: "p1", name: "Láser 6 sesiones", type: "LASER",

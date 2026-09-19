@@ -19,7 +19,10 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** La ficha de salud básica: la ven las dos que aplican tratamiento. */
   canViewClinical: boolean;
+  /** Fototipo y color de ojos y pelo: solo quien dispara el láser. */
+  canViewLaserClinical: boolean;
   canManageServices: boolean;
   canViewReports: boolean;
   canCreateBlocks: boolean;
@@ -100,7 +103,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     login,
     logout,
-    canViewClinical: user?.role === "OWNER",
+    canViewClinical: user?.role === "OWNER" || user?.role === "FACIALIST",
+    canViewLaserClinical: user?.role === "OWNER",
     canManageServices: user?.role === "OWNER",
     canViewReports: user?.role === "OWNER",
     // Las tres bloquean: la facialista la suya, la dueña y recepción también las demás.

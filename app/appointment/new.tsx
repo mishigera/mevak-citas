@@ -84,6 +84,7 @@ export default function NewAppointmentScreen() {
   const [startTime, setStartTime] = useState<string>("10:00");
   const [endTime, setEndTime] = useState<string>("11:00");
   const [notes, setNotes] = useState<string>("");
+  const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [showClientPicker, setShowClientPicker] = useState(false);
   const [showStaffPicker, setShowStaffPicker] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
@@ -110,6 +111,41 @@ export default function NewAppointmentScreen() {
     },
   });
 
+  const { data: services } = useQuery<any[]>({
+    queryKey: ["/api/services", type],
+    queryFn: async () => {
+      const base = getApiUrl();
+      const url = new URL(`/api/services?type=${type}`, base);
+      const res = await fetch(url.toString(), { headers: authH() });
+      return res.json() as Promise<any[]>;
+    },
+  });
+
+  const elegidos = (services || []).filter((s) => serviceIds.includes(s.id));
+  const duraciónTotal = elegidos.reduce((suma, s) => suma + (Number(s.durationMinutes) || 60), 0);
+
+  /** Suma minutos a `"HH:MM"` sin salirse del día. */
+  const sumarMinutos = (hora: string, minutos: number) => {
+    const total = Math.min(Number(hora.slice(0, 2)) * 60 + Number(hora.slice(3, 5)) + minutos, 23 * 60 + 59);
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  };
+
+  /**
+   * Elegir servicio recalcula la hora de fin con lo que duran. Antes había que
+   * calcularla a mano y el formulario siempre arrancaba en 10:00–11:00.
+   */
+  const alternarServicio = (servicio: any) => {
+    const siguiente = serviceIds.includes(servicio.id)
+      ? serviceIds.filter((id) => id !== servicio.id)
+      : [...serviceIds, servicio.id];
+    setServiceIds(siguiente);
+
+    const minutos = (services || [])
+      .filter((s) => siguiente.includes(s.id))
+      .reduce((suma, s) => suma + (Number(s.durationMinutes) || 60), 0);
+    if (minutos > 0) setEndTime(sumarMinutos(startTime, minutos));
+  };
+
   const createMutation = useMutation({
     mutationFn: async () => {
       const dateTimeStart = `${date}T${startTime}:00`;
@@ -122,7 +158,12 @@ export default function NewAppointmentScreen() {
         type,
         notes,
       });
-      return res.json();
+      const cita = await res.json() as { id: string };
+      // Los servicios se asignan aparte: el POST de la cita no los acepta.
+      if (serviceIds.length) {
+        await apiRequest("PUT", `/api/appointments/${cita.id}/services`, { serviceIds });
+      }
+      return cita;
     },
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["/api/appointments"] });
@@ -150,11 +191,9 @@ export default function NewAppointmentScreen() {
    */
   const alCambiarInicio = (nuevo: string) => {
     const minutos = (h: string) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
-    const duración = Math.max(minutos(endTime) - minutos(startTime), 15);
-    const fin = minutos(nuevo) + duración;
-    const horas = Math.min(Math.floor(fin / 60), 23);
+    const duración = duraciónTotal || Math.max(minutos(endTime) - minutos(startTime), 15);
     setStartTime(nuevo);
-    setEndTime(`${String(horas).padStart(2, "0")}:${String(fin % 60).padStart(2, "0")}`);
+    setEndTime(sumarMinutos(nuevo, duración));
   };
 
   const filteredClients = (clients || []).filter((c) =>
@@ -258,6 +297,39 @@ export default function NewAppointmentScreen() {
             </Selector>
           </View>
 
+          <View style={styles.grupo}>
+            <Label>Servicios</Label>
+            {(services || []).length === 0 ? (
+              <Text style={styles.sinServicios}>
+                No hay servicios de {type === "FACIAL" ? "facial" : "láser"} en el catálogo.
+              </Text>
+            ) : (
+              <View style={styles.servicios}>
+                {(services || []).map((s) => {
+                  const elegido = serviceIds.includes(s.id);
+                  return (
+                    <PressableMotion
+                      key={s.id}
+                      gesto="sutil"
+                      accessibilityLabel={s.name}
+                      accessibilityState={{ selected: elegido }}
+                      style={[styles.servicio, elegido && styles.servicioElegido]}
+                      onPress={() => alternarServicio(s)}
+                    >
+                      <Ionicons
+                        name={elegido ? "checkmark-circle" : "ellipse-outline"}
+                        size={18}
+                        color={elegido ? Colors.primary : Colors.textMuted}
+                      />
+                      <Text style={[styles.servicioNombre, elegido && { color: Colors.primaryDark }]}>{s.name}</Text>
+                      <Text style={styles.servicioMeta}>{s.durationMinutes ?? 60} min · ${s.price}</Text>
+                    </PressableMotion>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+
           <CampoFecha etiqueta="Fecha" value={date} onChange={setDate} />
           <View style={styles.fila}>
             <CampoHora etiqueta="Hora inicio" value={startTime} onChange={alCambiarInicio} style={styles.mitad} />
@@ -311,6 +383,16 @@ const styles = StyleSheet.create({
   opcionSub: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textMuted, marginTop: 1 },
 
   fila: { flexDirection: "row", gap: Space.md },
+  servicios: { gap: Space.xs },
+  servicio: {
+    flexDirection: "row", alignItems: "center", gap: Space.sm,
+    paddingVertical: Space.md - 2, paddingHorizontal: Space.md,
+    borderRadius: Radius.tile, borderWidth: 1, borderColor: Colors.glass.strokeSoft,
+  },
+  servicioElegido: { borderColor: Colors.primary, backgroundColor: Colors.primary + "12" },
+  servicioNombre: { flex: 1, fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.text },
+  servicioMeta: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
+  sinServicios: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textMuted, marginLeft: Space.xs },
   mitad: { flex: 1 },
   notas: { minHeight: 80, textAlignVertical: "top" },
   crear: { marginTop: Space.sm, paddingVertical: Space.lg },

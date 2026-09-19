@@ -147,6 +147,7 @@ describe("pantalla Más", () => {
       expect(screen.getByText("Corte e ingresos")).toBeTruthy();
       expect(screen.getByText("Servicios")).toBeTruthy();
       expect(screen.getByText("Paquetes")).toBeTruthy();
+      expect(screen.getByText("Horario del centro")).toBeTruthy();
       expect(screen.getByText("Usuarios")).toBeTruthy();
     });
 
@@ -177,6 +178,7 @@ describe("pantalla Más", () => {
       ["Corte e ingresos", "/admin/reports"],
       ["Servicios", "/admin/services"],
       ["Paquetes", "/admin/packages"],
+      ["Horario del centro", "/admin/horario"],
       ["Usuarios", "/admin/users"],
     ])("%s lleva a %s", (etiqueta, ruta) => {
       abrir("OWNER");

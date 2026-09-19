@@ -19,6 +19,10 @@ const staff = [
   fixtures.staff({ id: "u1", name: "Dueña", role: "OWNER" }),
   fixtures.staff({ id: "u2", name: "Lucía", role: "FACIALIST" }),
 ];
+const servicios = [
+  fixtures.servicio({ id: "s1", name: "Limpieza profunda", type: "FACIAL", price: 800, durationMinutes: 90 }),
+  fixtures.servicio({ id: "s2", name: "Dermapen", type: "FACIAL", price: 1500, durationMinutes: 45 }),
+];
 
 beforeEach(() => {
   resetApi();
@@ -27,7 +31,7 @@ beforeEach(() => {
   Object.values(mockRouter).forEach((m) => typeof m.mockClear === "function" && m.mockClear());
   mockRouter.canGoBack.mockReturnValue(true);
   alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
-  mockApi({ "/api/clients": clientes, "/api/users/staff": staff });
+  mockApi({ "/api/clients": clientes, "/api/users/staff": staff, "/api/services": servicios });
 });
 afterEach(() => alertSpy.mockRestore());
 
@@ -304,5 +308,104 @@ describe("salir sin crear", () => {
     pressIcon("close");
 
     expect(mockRouter.replace).toHaveBeenCalledWith("/(tabs)/calendar");
+  });
+});
+
+/**
+ * La hora de fin sale de lo que duran los servicios. Antes se tecleaba a mano y el
+ * formulario siempre arrancaba en 10:00–11:00, durase lo que durase la cita.
+ */
+describe("servicios y duración", () => {
+  it("lista los servicios del tipo elegido con su duración y precio", async () => {
+    await abrir();
+
+    expect(screen.getByText("Limpieza profunda")).toBeTruthy();
+    expect(screen.getByText("90 min · $800")).toBeTruthy();
+  });
+
+  it("elegir un servicio mueve la hora de fin", async () => {
+    await abrir();
+    await elegirHora("Hora inicio", "10:00");
+
+    fireEvent.press(screen.getByLabelText("Limpieza profunda"));
+
+    // 10:00 + 90 min
+    await waitFor(() => expect(screen.getByLabelText("Hora fin").props.accessibilityValue.text).toBe("11:30"));
+  });
+
+  it("dos servicios suman sus duraciones", async () => {
+    await abrir();
+    await elegirHora("Hora inicio", "10:00");
+
+    fireEvent.press(screen.getByLabelText("Limpieza profunda"));
+    fireEvent.press(screen.getByLabelText("Dermapen"));
+
+    // 90 + 45
+    await waitFor(() => expect(screen.getByLabelText("Hora fin").props.accessibilityValue.text).toBe("12:15"));
+  });
+
+  it("quitar un servicio recalcula", async () => {
+    await abrir();
+    await elegirHora("Hora inicio", "10:00");
+    fireEvent.press(screen.getByLabelText("Limpieza profunda"));
+    fireEvent.press(screen.getByLabelText("Dermapen"));
+
+    fireEvent.press(screen.getByLabelText("Dermapen"));
+
+    await waitFor(() => expect(screen.getByLabelText("Hora fin").props.accessibilityValue.text).toBe("11:30"));
+  });
+
+  it("mover el inicio arrastra el fin conservando la duración", async () => {
+    await abrir();
+    fireEvent.press(screen.getByLabelText("Limpieza profunda"));
+    await elegirHora("Hora inicio", "16:00");
+
+    await waitFor(() => expect(screen.getByLabelText("Hora fin").props.accessibilityValue.text).toBe("17:30"));
+  });
+
+  it("guarda los servicios elegidos junto con la cita", async () => {
+    mockApi({
+      "/api/clients": clientes,
+      "/api/users/staff": staff,
+      "/api/services": servicios,
+      "POST /api/appointments": { id: "nueva" },
+      "PUT /api/appointments/nueva/services": [],
+    });
+    await abrir();
+    await elegirCliente("María López");
+    await elegirStaff("Dueña");
+    fireEvent.press(screen.getByLabelText("Limpieza profunda"));
+
+    fireEvent.press(screen.getByText("Crear cita"));
+
+    await waitFor(() =>
+      expect(apiCalls().some((c) => c.method === "PUT" && c.path === "/api/appointments/nueva/services")).toBe(true),
+    );
+    const put = apiCalls().find((c) => c.method === "PUT")!;
+    expect(put.body).toEqual({ serviceIds: ["s1"] });
+  });
+
+  it("sin servicios elegidos no llama al endpoint de servicios", async () => {
+    mockApi({
+      "/api/clients": clientes,
+      "/api/users/staff": staff,
+      "/api/services": servicios,
+      "POST /api/appointments": { id: "nueva" },
+    });
+    await abrir();
+    await elegirCliente("María López");
+    await elegirStaff("Dueña");
+
+    fireEvent.press(screen.getByText("Crear cita"));
+
+    await waitFor(() => expect(apiCalls().some((c) => c.method === "POST")).toBe(true));
+    expect(apiCalls().some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("avisa si el catálogo no tiene servicios de ese tipo", async () => {
+    mockApi({ "/api/clients": clientes, "/api/users/staff": staff, "/api/services": [] });
+    await abrir();
+
+    expect(screen.getByText(/No hay servicios de facial en el catálogo/)).toBeTruthy();
   });
 });

@@ -89,8 +89,8 @@ export function aClient(over: Partial<Record<string, unknown>> = {}) {
 export function anAppointment(over: Partial<Record<string, unknown>> = {}) {
   return {
     id: nextId("appt"),
-    dateTimeStart: "2026-10-01T10:00:00.000Z",
-    dateTimeEnd: "2026-10-01T11:00:00.000Z",
+    dateTimeStart: "2026-10-01T10:00:00",
+    dateTimeEnd: "2026-10-01T11:00:00",
     clientId: "client-1",
     staffId: "user-1",
     type: "FACIAL",
@@ -130,7 +130,7 @@ export function aClientPackage(over: Partial<Record<string, unknown>> = {}) {
     totalSessions: 6,
     usedSessions: 0,
     remainingSessions: 6,
-    startDate: "2026-09-01T00:00:00.000Z",
+    startDate: "2026-09-01T00:00:00",
     status: "ACTIVE",
     ...over,
   };
@@ -140,8 +140,8 @@ export function aBlock(over: Partial<Record<string, unknown>> = {}) {
   return {
     id: nextId("block"),
     userId: "user-1",
-    startDateTime: "2026-10-02T09:00:00.000Z",
-    endDateTime: "2026-10-02T13:00:00.000Z",
+    startDateTime: "2026-10-02T09:00:00",
+    endDateTime: "2026-10-02T13:00:00",
     reason: "Vacaciones",
     ...over,
   };

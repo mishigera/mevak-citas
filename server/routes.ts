@@ -48,6 +48,9 @@ function requireRole(...roles: Role[]) {
   };
 }
 
+/** Lo que dura un servicio si nadie dijo otra cosa. */
+export const DURACION_POR_DEFECTO = 60;
+
 function enrichClientPackage(clientPackage: ClientPackage | null | undefined) {
   if (!clientPackage) return null;
   const pkg = storage.packages.get(clientPackage.packageId);
@@ -102,6 +105,45 @@ function diaLocalDe(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** `"09:00"` → 540. `null` si no tiene forma de hora. */
+function minutosDeHora(hora: string): number | null {
+  if (!/^\d{2}:\d{2}$/.test(hora)) return null;
+  const [h, m] = hora.split(":").map(Number);
+  if (h > 23 || m > 59) return null;
+  return h * 60 + m;
+}
+
+/**
+ * La cita cae fuera del horario del centro.
+ *
+ * Antes no había horario y se podía agendar a las 03:00 de un domingo. Devuelve el
+ * motivo para decirlo en el mensaje, o `null` si la cita cabe.
+ */
+function fueraDeHorario(inicioISO: string, finISO: string): string | null {
+  const inicio = new Date(inicioISO);
+  const fin = new Date(finISO);
+  const horario = storage.centerHours.get(String(inicio.getDay()));
+  if (!horario) return null;
+
+  const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  if (!horario.open) return `El centro no abre los ${DIAS[inicio.getDay()]}`;
+
+  const abre = minutosDeHora(horario.opensAt);
+  const cierra = minutosDeHora(horario.closesAt);
+  if (abre === null || cierra === null) return null;
+
+  const empieza = inicio.getHours() * 60 + inicio.getMinutes();
+  // Una cita que cruza la medianoche se sale del horario por definición.
+  const termina = inicio.toDateString() === fin.toDateString()
+    ? fin.getHours() * 60 + fin.getMinutes()
+    : 24 * 60;
+
+  if (empieza < abre || termina > cierra) {
+    return `Los ${DIAS[inicio.getDay()]} el centro abre de ${horario.opensAt} a ${horario.closesAt}`;
+  }
+  return null;
 }
 
 function seSolapan(aInicio: number, aFin: number, bInicio: unknown, bFin: unknown): boolean {
@@ -232,25 +274,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // CLINICAL PROFILE
-  app.get("/api/clients/:id/clinical", requireRole("OWNER"), (req, res) => {
+  /**
+   * La ficha está partida en dos por quién la necesita:
+   *
+   * - **Salud básica** (alergias, antecedentes, medicamentos, cirugías) la leen y
+   *   escriben la dueña **y la facialista**: un dermapen sobre alguien con
+   *   isotretinoína o un herpes activo es un problema, y hasta ahora la facialista
+   *   trabajaba sin ver nada.
+   * - **Datos de láser** (fototipo, color de ojos y de pelo) son solo de la dueña, que
+   *   es quien dispara el equipo.
+   *
+   * Es una sola entidad —la persistencia no da para más (ADR-0001)— y el corte se
+   * aplica aquí, en el endpoint.
+   */
+  const CAMPOS_SALUD = ["allergiesFlag", "allergiesText", "conditionsJson", "medsText", "surgeriesText"] as const;
+  const CAMPOS_LASER = ["phototype", "eyeColor", "hairColor"] as const;
+
+  function soloSalud(profile: Record<string, unknown>) {
+    const salida: Record<string, unknown> = { id: profile.id, clientId: profile.clientId };
+    CAMPOS_SALUD.forEach((campo) => {
+      if (profile[campo] !== undefined) salida[campo] = profile[campo];
+    });
+    return salida;
+  }
+
+  app.get("/api/clients/:id/clinical", requireRole("OWNER", "FACIALIST"), (req, res) => {
     const profiles = Array.from(storage.clinicalProfiles.values());
     const profile = profiles.find((p) => p.clientId === paramId(req));
-    res.json(profile || null);
+    if (!profile) return res.json(null);
+    res.json(req.userRole === "FACIALIST" ? soloSalud(profile as never) : profile);
   });
 
-  app.put("/api/clients/:id/clinical", requireRole("OWNER"), (req, res) => {
+  app.put("/api/clients/:id/clinical", requireRole("OWNER", "FACIALIST"), (req, res) => {
     const clientId = paramId(req);
+    // La facialista solo escribe lo suyo: si mandara un fototipo, se descarta.
+    const permitidos = req.userRole === "FACIALIST"
+      ? CAMPOS_SALUD as readonly string[]
+      : [...CAMPOS_SALUD, ...CAMPOS_LASER] as readonly string[];
+    const cambios: Record<string, unknown> = {};
+    permitidos.forEach((campo) => {
+      if (req.body[campo] !== undefined) cambios[campo] = req.body[campo];
+    });
+
     const profiles = Array.from(storage.clinicalProfiles.values());
     const profile = profiles.find((p) => p.clientId === clientId);
     if (profile) {
-      Object.assign(profile, req.body, { clientId });
+      Object.assign(profile, cambios, { clientId });
       storage.clinicalProfiles.set(profile.id, profile);
-      return res.json(profile);
-    } else {
-      const createdProfile = { id: randomUUID(), clientId, ...req.body };
-      storage.clinicalProfiles.set(createdProfile.id, createdProfile);
-      return res.json(createdProfile);
+      return res.json(req.userRole === "FACIALIST" ? soloSalud(profile as never) : profile);
     }
+    // El `clientId` va DETRÁS de los cambios: al revés, un `clientId` en el cuerpo
+    // pisaba el de la URL y la historia clínica se creaba colgada de otra clienta,
+    // invisible desde esta. Son datos médicos. Deuda §17.
+    const createdProfile = { id: randomUUID(), ...cambios, clientId } as never;
+    storage.clinicalProfiles.set((createdProfile as { id: string }).id, createdProfile);
+    return res.json(req.userRole === "FACIALIST" ? soloSalud(createdProfile) : createdProfile);
   });
 
   // LASER AREAS
@@ -335,9 +413,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/services", requireRole("OWNER"), (req, res) => {
-    const { name, type, price } = req.body;
+    const { name, type, price, durationMinutes } = req.body;
     if (!name || !type || price === undefined) return res.status(400).json({ message: "Faltan campos" });
-    const svc = { id: randomUUID(), name, type, price: Number(price), isActive: true };
+    const duracion = durationMinutes === undefined ? DURACION_POR_DEFECTO : Number(durationMinutes);
+    if (!Number.isFinite(duracion) || duracion <= 0) return res.status(400).json({ message: "Duración inválida" });
+    const svc = { id: randomUUID(), name, type, price: Number(price), durationMinutes: duracion, isActive: true };
     storage.services.set(svc.id, svc);
     res.status(201).json(svc);
   });
@@ -400,6 +480,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const intervalo = validarIntervalo(dateTimeStart, dateTimeEnd);
     if (typeof intervalo === "string") return res.status(400).json({ message: intervalo });
     const { start, end } = intervalo;
+    const fuera = fueraDeHorario(dateTimeStart, dateTimeEnd);
+    if (fuera) return res.status(409).json({ message: fuera });
     if (citaEnConflicto(staffId, start, end)) return res.status(409).json({ message: "Conflicto de horario con otra cita" });
     const block = bloqueoEnConflicto(staffId, start, end);
     if (block) {
@@ -423,6 +505,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const intervalo = validarIntervalo(dateTimeStart || appt.dateTimeStart, dateTimeEnd || appt.dateTimeEnd);
       if (typeof intervalo === "string") return res.status(400).json({ message: intervalo });
       const { start, end } = intervalo;
+      const fuera = fueraDeHorario(dateTimeStart || appt.dateTimeStart, dateTimeEnd || appt.dateTimeEnd);
+      if (fuera) return res.status(409).json({ message: fuera });
       if (citaEnConflicto(checkStaff, start, end, appt.id)) return res.status(409).json({ message: "Conflicto de horario con otra cita" });
       const block = bloqueoEnConflicto(checkStaff, start, end);
       if (block) {
@@ -717,6 +801,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     storage.availabilityBlocks.delete(blockId);
     res.json({ ok: true });
+  });
+
+  // CENTER HOURS
+  app.get("/api/center-hours", requireAuth, (req, res) => {
+    const horas = Array.from(storage.centerHours.values()).sort((a, b) => a.weekday - b.weekday);
+    res.json(horas);
+  });
+
+  app.put("/api/center-hours", requireRole("OWNER"), (req, res) => {
+    const dias = req.body as { weekday: number; open: boolean; opensAt: string; closesAt: string }[];
+    if (!Array.isArray(dias)) return res.status(400).json({ message: "Se espera una lista de días" });
+
+    for (const dia of dias) {
+      if (!Number.isInteger(dia.weekday) || dia.weekday < 0 || dia.weekday > 6) {
+        return res.status(400).json({ message: "Día de la semana inválido" });
+      }
+      if (dia.open) {
+        const abre = minutosDeHora(dia.opensAt);
+        const cierra = minutosDeHora(dia.closesAt);
+        if (abre === null || cierra === null) return res.status(400).json({ message: "Hora inválida" });
+        if (cierra <= abre) return res.status(400).json({ message: "La hora de cierre debe ser posterior a la de apertura" });
+      }
+    }
+
+    dias.forEach((dia) => {
+      storage.centerHours.set(String(dia.weekday), {
+        id: String(dia.weekday),
+        weekday: dia.weekday,
+        open: !!dia.open,
+        opensAt: dia.opensAt,
+        closesAt: dia.closesAt,
+      });
+    });
+
+    res.json(Array.from(storage.centerHours.values()).sort((a, b) => a.weekday - b.weekday));
   });
 
   // CLIENT APPOINTMENT HISTORY

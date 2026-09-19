@@ -21,6 +21,7 @@ export default function ServicesScreen() {
   const [name, setName] = useState("");
   const [type, setType] = useState<"FACIAL" | "LASER">("FACIAL");
   const [price, setPrice] = useState("");
+  const [duracion, setDuracion] = useState("60");
 
   const { data: services, isLoading } = useQuery<any[]>({
     queryKey: ["/api/services"],
@@ -34,7 +35,9 @@ export default function ServicesScreen() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("POST", "/api/services", { name: name.trim(), type, price: Number(price) });
+      await apiRequest("POST", "/api/services", {
+        name: name.trim(), type, price: Number(price), durationMinutes: Number(duracion) || 60,
+      });
     },
     onSuccess: () => {
       console.log("Service created successfully");
@@ -90,6 +93,7 @@ export default function ServicesScreen() {
             />
             <CampoTexto value={name} onChangeText={setName} placeholder="Nombre del servicio" />
             <CampoTexto value={price} onChangeText={setPrice} placeholder="Precio ($)" keyboardType="numeric" />
+            <CampoTexto value={duracion} onChangeText={setDuracion} placeholder="Duración (minutos)" keyboardType="numeric" />
             <BotonPrimario
               titulo="Guardar"
               cargando={createMutation.isPending}
@@ -129,6 +133,7 @@ export default function ServicesScreen() {
                   <View style={styles.info}>
                     <Text style={styles.nombre}>{svc.name}</Text>
                     <Text style={styles.precio}>${svc.price}</Text>
+                    <Text style={styles.duracion}>{svc.durationMinutes ?? 60} min</Text>
                   </View>
                   <PressableMotion
                     gesto="escala"
@@ -174,4 +179,5 @@ const styles = StyleSheet.create({
   info: { flex: 1 },
   nombre: { fontFamily: "Nunito_600SemiBold", fontSize: 14, color: Colors.text },
   precio: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.primary },
+  duracion: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
 });

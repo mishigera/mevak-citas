@@ -25,8 +25,8 @@ const crear = (app: Express, token: string, body: object) =>
   request(app).post("/api/appointments").set("Authorization", `Bearer ${token}`).send(body);
 
 const base = {
-  dateTimeStart: "2026-10-01T10:00:00.000Z",
-  dateTimeEnd: "2026-10-01T11:00:00.000Z",
+  dateTimeStart: "2026-10-01T10:00:00",
+  dateTimeEnd: "2026-10-01T11:00:00",
   clientId: "client-1",
   staffId: STAFF,
   type: "FACIAL",
@@ -60,8 +60,8 @@ describe("crear cita", () => {
 describe("solapamiento con otras citas", () => {
   const existente = anAppointment({
     id: "a1", staffId: STAFF, clientId: "client-1",
-    dateTimeStart: "2026-10-01T10:00:00.000Z",
-    dateTimeEnd: "2026-10-01T11:00:00.000Z",
+    dateTimeStart: "2026-10-01T10:00:00",
+    dateTimeEnd: "2026-10-01T11:00:00",
   });
 
   it.each([
@@ -74,8 +74,8 @@ describe("solapamiento con otras citas", () => {
     const { app, token } = await setup({ appointments: [existente] });
     const res = await crear(app, token, {
       ...base,
-      dateTimeStart: `2026-10-01T${ini}:00.000Z`,
-      dateTimeEnd: `2026-10-01T${fin}:00.000Z`,
+      dateTimeStart: `2026-10-01T${ini}:00`,
+      dateTimeEnd: `2026-10-01T${fin}:00`,
     });
 
     expect(res.status).toBe(409);
@@ -91,8 +91,8 @@ describe("solapamiento con otras citas", () => {
     const { app, token } = await setup({ appointments: [existente] });
     const res = await crear(app, token, {
       ...base,
-      dateTimeStart: `2026-10-${dia}T${ini}:00.000Z`,
-      dateTimeEnd: `2026-10-${dia}T${fin}:00.000Z`,
+      dateTimeStart: `2026-10-${dia}T${ini}:00`,
+      dateTimeEnd: `2026-10-${dia}T${fin}:00`,
     });
 
     expect(res.status).toBe(201);
@@ -117,8 +117,8 @@ describe("solapamiento con otras citas", () => {
 describe("solapamiento con bloqueos de disponibilidad", () => {
   const bloqueo = aBlock({
     id: "b1", userId: STAFF,
-    startDateTime: "2026-10-01T09:00:00.000Z",
-    endDateTime: "2026-10-01T13:00:00.000Z",
+    startDateTime: "2026-10-01T09:00:00",
+    endDateTime: "2026-10-01T13:00:00",
   });
 
   it("409 al agendar dentro de un bloqueo", async () => {
@@ -133,8 +133,8 @@ describe("solapamiento con bloqueos de disponibilidad", () => {
     const { app, token } = await setup({ availabilityBlocks: [bloqueo] });
     const res = await crear(app, token, {
       ...base,
-      dateTimeStart: "2026-10-01T14:00:00.000Z",
-      dateTimeEnd: "2026-10-01T15:00:00.000Z",
+      dateTimeStart: "2026-10-01T14:00:00",
+      dateTimeEnd: "2026-10-01T15:00:00",
     });
 
     expect(res.status).toBe(201);
@@ -142,7 +142,7 @@ describe("solapamiento con bloqueos de disponibilidad", () => {
 
   it("el bloqueo de otro staff no estorba", async () => {
     const ajeno = aBlock({ id: "b2", userId: OTRO_STAFF,
-      startDateTime: "2026-10-01T09:00:00.000Z", endDateTime: "2026-10-01T13:00:00.000Z" });
+      startDateTime: "2026-10-01T09:00:00", endDateTime: "2026-10-01T13:00:00" });
     const { app, token } = await setup({ availabilityBlocks: [ajeno] });
 
     expect((await crear(app, token, base)).status).toBe(201);
@@ -183,12 +183,12 @@ describe("editar cita", () => {
 
   it("409 si al mover choca con otra cita", async () => {
     const otra = anAppointment({ id: "a2", staffId: STAFF, clientId: "client-1",
-      dateTimeStart: "2026-10-01T15:00:00.000Z", dateTimeEnd: "2026-10-01T16:00:00.000Z" });
+      dateTimeStart: "2026-10-01T15:00:00", dateTimeEnd: "2026-10-01T16:00:00" });
     const { app, token } = await setup({ appointments: [cita, otra] });
 
     const res = await request(app).patch("/api/appointments/a1")
       .set("Authorization", `Bearer ${token}`)
-      .send({ dateTimeStart: "2026-10-01T15:30:00.000Z", dateTimeEnd: "2026-10-01T16:30:00.000Z" });
+      .send({ dateTimeStart: "2026-10-01T15:30:00", dateTimeEnd: "2026-10-01T16:30:00" });
 
     expect(res.status).toBe(409);
   });
@@ -206,12 +206,12 @@ describe("editar cita", () => {
   /** Deuda §8, cerrada en p005 fase A: el PATCH valida bloqueos igual que el POST. */
   it("rechaza mover una cita encima de un bloqueo", async () => {
     const bloqueo = aBlock({ id: "b1", userId: STAFF,
-      startDateTime: "2026-10-05T09:00:00.000Z", endDateTime: "2026-10-05T13:00:00.000Z" });
+      startDateTime: "2026-10-05T09:00:00", endDateTime: "2026-10-05T13:00:00" });
     const { app, token } = await setup({ appointments: [cita], availabilityBlocks: [bloqueo] });
 
     const res = await request(app).patch("/api/appointments/a1")
       .set("Authorization", `Bearer ${token}`)
-      .send({ dateTimeStart: "2026-10-05T10:00:00.000Z", dateTimeEnd: "2026-10-05T11:00:00.000Z" });
+      .send({ dateTimeStart: "2026-10-05T10:00:00", dateTimeEnd: "2026-10-05T11:00:00" });
 
     expect(res.status).toBe(409);
   });
@@ -249,9 +249,9 @@ describe("consultar citas", () => {
   it("el historial de un cliente viene ordenado del más reciente al más antiguo", async () => {
     const { app, token } = await setup({
       appointments: [
-        anAppointment({ id: "vieja", clientId: "client-1", dateTimeStart: "2026-01-01T10:00:00.000Z" }),
-        anAppointment({ id: "nueva", clientId: "client-1", dateTimeStart: "2026-12-01T10:00:00.000Z" }),
-        anAppointment({ id: "media", clientId: "client-1", dateTimeStart: "2026-06-01T10:00:00.000Z" }),
+        anAppointment({ id: "vieja", clientId: "client-1", dateTimeStart: "2026-01-01T10:00:00" }),
+        anAppointment({ id: "nueva", clientId: "client-1", dateTimeStart: "2026-12-01T10:00:00" }),
+        anAppointment({ id: "media", clientId: "client-1", dateTimeStart: "2026-06-01T10:00:00" }),
         anAppointment({ id: "ajena", clientId: "otro" }),
       ],
     });
@@ -297,8 +297,8 @@ describe("validación de fechas al crear y mover citas", () => {
     const { app, token } = await setup();
     const res = await crear(app, token, {
       ...base,
-      dateTimeStart: "2026-10-01T11:00:00.000Z",
-      dateTimeEnd: "2026-10-01T10:00:00.000Z",
+      dateTimeStart: "2026-10-01T11:00:00",
+      dateTimeEnd: "2026-10-01T10:00:00",
     });
 
     expect(res.status).toBe(400);
@@ -334,7 +334,7 @@ describe("validación de fechas al crear y mover citas", () => {
 describe("bloqueo de centro", () => {
   const cierre = {
     id: "b-centro", userId: null,
-    startDateTime: "2026-10-01T09:00:00.000Z", endDateTime: "2026-10-01T18:00:00.000Z",
+    startDateTime: "2026-10-01T09:00:00", endDateTime: "2026-10-01T18:00:00",
     reason: "Día festivo",
   };
 
@@ -356,13 +356,13 @@ describe("bloqueo de centro", () => {
 
   it("tampoco deja mover una cita a ese hueco", async () => {
     const { app, token } = await setup({
-      appointments: [anAppointment({ id: "a1", dateTimeStart: "2026-10-05T10:00:00.000Z", dateTimeEnd: "2026-10-05T11:00:00.000Z" })],
+      appointments: [anAppointment({ id: "a1", dateTimeStart: "2026-10-05T10:00:00", dateTimeEnd: "2026-10-05T11:00:00" })],
       availabilityBlocks: [cierre],
     });
 
     const res = await request(app).patch("/api/appointments/a1")
       .set("Authorization", `Bearer ${token}`)
-      .send({ dateTimeStart: "2026-10-01T10:00:00.000Z", dateTimeEnd: "2026-10-01T11:00:00.000Z" });
+      .send({ dateTimeStart: "2026-10-01T10:00:00", dateTimeEnd: "2026-10-01T11:00:00" });
 
     expect(res.status).toBe(409);
   });
@@ -371,10 +371,71 @@ describe("bloqueo de centro", () => {
     const { app, token } = await setup({ availabilityBlocks: [cierre] });
     const res = await crear(app, token, {
       ...base,
-      dateTimeStart: "2026-10-02T10:00:00.000Z",
-      dateTimeEnd: "2026-10-02T11:00:00.000Z",
+      dateTimeStart: "2026-10-02T10:00:00",
+      dateTimeEnd: "2026-10-02T11:00:00",
     });
 
     expect(res.status).toBe(201);
+  });
+});
+
+/** Antes se podía agendar a las 03:00 de un domingo: no había horario que consultar. */
+describe("horario del centro", () => {
+  const enDomingo = {
+    ...base,
+    dateTimeStart: "2026-10-04T10:00:00",  // domingo
+    dateTimeEnd: "2026-10-04T11:00:00",
+  };
+
+  it("409 un día en que el centro no abre", async () => {
+    const { app, token } = await setup();
+    const res = await crear(app, token, enDomingo);
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/no abre los domingo/i);
+  });
+
+  it("409 antes de la hora de apertura", async () => {
+    const { app, token } = await setup();
+    const res = await crear(app, token, {
+      ...base, dateTimeStart: "2026-10-01T07:00:00", dateTimeEnd: "2026-10-01T08:00:00",
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/abre de 09:00 a 19:00/i);
+  });
+
+  it("409 si termina después del cierre", async () => {
+    const { app, token } = await setup();
+    const res = await crear(app, token, {
+      ...base, dateTimeStart: "2026-10-01T18:30:00", dateTimeEnd: "2026-10-01T19:30:00",
+    });
+
+    expect(res.status).toBe(409);
+  });
+
+  it("acepta una cita que cabe justo", async () => {
+    const { app, token } = await setup();
+    const res = await crear(app, token, {
+      ...base, dateTimeStart: "2026-10-01T09:00:00", dateTimeEnd: "2026-10-01T10:00:00",
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("respeta el horario que se haya guardado, no el de fábrica", async () => {
+    const { app, token, storage } = await setup();
+    storage.centerHours.set("0", { id: "0", weekday: 0, open: true, opensAt: "10:00", closesAt: "14:00" } as never);
+
+    expect((await crear(app, token, enDomingo)).status).toBe(201);
+  });
+
+  it("tampoco deja mover una cita fuera de horario", async () => {
+    const { app, token } = await setup({ appointments: [anAppointment({ id: "a1" })] });
+    const res = await request(app).patch("/api/appointments/a1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ dateTimeStart: "2026-10-04T10:00:00", dateTimeEnd: "2026-10-04T11:00:00" });
+
+    expect(res.status).toBe(409);
   });
 });

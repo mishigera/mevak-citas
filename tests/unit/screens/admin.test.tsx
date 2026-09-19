@@ -7,9 +7,10 @@ import ReportsScreen from "@/app/admin/reports";
 import PackagesScreen from "@/app/admin/packages";
 import ServicesScreen from "@/app/admin/services";
 import PaymentsScreen from "@/app/admin/payments";
+import HorarioScreen from "@/app/admin/horario";
 import {
   renderScreen, resetApi, mockApi, apiCalls, mockRouter, pressIcon,
-  __setAuthUser, __resetAuth, fixtures,
+  __setAuthUser, __resetAuth, fixtures, elegirHora,
 } from "../../setup/screen-harness";
 
 let alertSpy: jest.SpyInstance;
@@ -373,5 +374,79 @@ describe("pagos pendientes a facialistas", () => {
     await waitFor(() => expect(screen.getByText("Lucía")).toBeTruthy());
 
     expect(apiCalls().filter((c) => c.method === "PATCH")).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------- Horario
+describe("horario del centro", () => {
+  const horario = [
+    { weekday: 0, open: false, opensAt: "09:00", closesAt: "19:00" },
+    { weekday: 1, open: true, opensAt: "09:00", closesAt: "19:00" },
+    { weekday: 6, open: true, opensAt: "09:00", closesAt: "15:00" },
+  ];
+
+  it("lista los días con su horario", async () => {
+    mockApi({ "/api/center-hours": horario });
+    renderScreen(<HorarioScreen />);
+
+    await waitFor(() => expect(screen.getByText("Lunes")).toBeTruthy());
+    expect(screen.getByText("Domingo")).toBeTruthy();
+    expect(screen.getByText("Sábado")).toBeTruthy();
+  });
+
+  it("un día cerrado lo dice en vez de enseñar horas", async () => {
+    mockApi({ "/api/center-hours": horario });
+    renderScreen(<HorarioScreen />);
+
+    await waitFor(() => expect(screen.getByText("Cerrado")).toBeTruthy());
+    expect(screen.queryByLabelText("Abre Domingo")).toBeNull();
+  });
+
+  it("al abrir un día aparecen sus horas", async () => {
+    mockApi({ "/api/center-hours": horario });
+    renderScreen(<HorarioScreen />);
+    await waitFor(() => expect(screen.getByText("Domingo")).toBeTruthy());
+
+    fireEvent(screen.getByLabelText("Abrir Domingo"), "valueChange", true);
+
+    await waitFor(() => expect(screen.getByLabelText("Abre Domingo")).toBeTruthy());
+  });
+
+  it("guarda lo que se cambió", async () => {
+    mockApi({ "/api/center-hours": horario, "PUT /api/center-hours": horario });
+    renderScreen(<HorarioScreen />);
+    await waitFor(() => expect(screen.getByText("Lunes")).toBeTruthy());
+
+    await elegirHora("Abre Lunes", "10:00");
+    fireEvent.press(screen.getByText("Guardar horario"));
+
+    await waitFor(() => expect(apiCalls().some((c) => c.method === "PUT")).toBe(true));
+    const put = apiCalls().find((c) => c.method === "PUT")!;
+    expect((put.body as any[]).find((d) => d.weekday === 1).opensAt).toBe("10:00");
+  });
+
+  it("avisa del error del servidor", async () => {
+    mockApi({
+      "/api/center-hours": horario,
+      "PUT /api/center-hours": { __status: 400, message: "La hora de cierre debe ser posterior a la de apertura" },
+    });
+    renderScreen(<HorarioScreen />);
+    await waitFor(() => expect(screen.getByText("Lunes")).toBeTruthy());
+
+    fireEvent.press(screen.getByText("Guardar horario"));
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith("Error", expect.stringMatching(/posterior a la de apertura/)),
+    );
+  });
+
+  it("cierra volviendo atrás", async () => {
+    mockApi({ "/api/center-hours": horario });
+    renderScreen(<HorarioScreen />);
+    await waitFor(() => expect(screen.getByText("Lunes")).toBeTruthy());
+
+    pressIcon("close");
+
+    expect(mockRouter.back).toHaveBeenCalled();
   });
 });

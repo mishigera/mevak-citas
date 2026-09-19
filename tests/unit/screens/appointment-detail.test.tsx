@@ -1,7 +1,7 @@
 jest.mock("@/contexts/auth", () => require("../../setup/auth-mock"));
 
 import React from "react";
-import { Alert } from "react-native";
+import { Alert, Linking } from "react-native";
 import { screen, fireEvent, waitFor } from "@testing-library/react-native";
 import AppointmentDetailScreen from "@/app/appointment/[id]";
 import type { Role } from "../../setup/auth-mock";
@@ -424,5 +424,115 @@ describe("estados de carga y navegación", () => {
     });
 
     expect(screen.getByText("Detalle de cita")).toBeTruthy();
+  });
+});
+
+/** No hay backend de notificaciones: se abre WhatsApp con el texto escrito. */
+describe("recordatorio por WhatsApp", () => {
+  let openSpy: jest.SpyInstance;
+  beforeEach(() => {
+    openSpy = jest.spyOn(Linking, "openURL").mockResolvedValue(true as never);
+  });
+  afterEach(() => openSpy.mockRestore());
+
+  it("abre wa.me con el teléfono limpio y el mensaje puesto", async () => {
+    await abrir("RECEPTION", {
+      "/api/appointments/a1": cita({ client: fixtures.cliente({ id: "c1", fullName: "María López", phone: "555-111-2222" }) }),
+    });
+
+    fireEvent.press(screen.getByLabelText("Recordar por WhatsApp"));
+
+    expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("https://wa.me/525551112222"));
+    expect(decodeURIComponent(openSpy.mock.calls[0][0] as string)).toContain("Hola María");
+  });
+
+  it("no ofrece el botón si la ficha no tiene teléfono", async () => {
+    await abrir("RECEPTION", {
+      "/api/appointments/a1": cita({ client: { id: "c1", fullName: "Sin Teléfono", phone: "" } }),
+    });
+
+    expect(screen.queryByLabelText("Recordar por WhatsApp")).toBeNull();
+  });
+
+  it("no lo ofrece en una cita ya terminada", async () => {
+    await abrir("OWNER", {
+      "/api/appointments/a1": cita({ status: "DONE", payment: { id: "p1", method: "CASH", totalAmount: 800 } }),
+    });
+
+    expect(screen.queryByLabelText("Recordar por WhatsApp")).toBeNull();
+  });
+});
+
+/** Deuda §11: un cobro mal capturado solo se arreglaba tocando la base a mano. */
+describe("anular un pago", () => {
+  const terminada = (over: Record<string, unknown> = {}) => ({
+    "/api/appointments/a1": cita({
+      status: "DONE",
+      payment: { id: "p1", method: "CASH", totalAmount: 800, ownerNetAmount: 400, facialistNetAmount: 400, facialistPaidFlag: false },
+      ...over,
+    }),
+  });
+
+  it("la dueña ve el botón", async () => {
+    await abrir("OWNER", terminada());
+
+    expect(screen.getByLabelText("Anular pago")).toBeTruthy();
+  });
+
+  it("la recepcionista no", async () => {
+    await abrir("RECEPTION", terminada());
+
+    expect(screen.queryByLabelText("Anular pago")).toBeNull();
+  });
+
+  it("pide confirmación antes de tocar nada", async () => {
+    await abrir("OWNER", terminada());
+
+    fireEvent.press(screen.getByLabelText("Anular pago"));
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      "Anular pago",
+      expect.stringContaining("vuelve"),
+      expect.any(Array),
+    );
+    expect(apiCalls().some((c) => c.method === "DELETE")).toBe(false);
+  });
+
+  it("al confirmar llama al endpoint", async () => {
+    await abrir("OWNER", { ...terminada(), "DELETE /api/payments/p1": { ok: true } });
+    fireEvent.press(screen.getByLabelText("Anular pago"));
+
+    const botones = alertSpy.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
+    botones.find((b) => b.text === "Anular")!.onPress!();
+
+    await waitFor(() =>
+      expect(apiCalls().some((c) => c.method === "DELETE" && c.path === "/api/payments/p1")).toBe(true),
+    );
+  });
+});
+
+/** El monto era un campo vacío teniendo los precios de los servicios al lado. */
+describe("el total del pago viene precargado", () => {
+  it("suma los servicios de la cita", async () => {
+    await abrir("OWNER", {
+      "/api/appointments/a1": cita({
+        status: "ARRIVED",
+        type: "FACIAL",
+        services: [fixtures.servicio({ id: "s1", price: 800 }), fixtures.servicio({ id: "s2", price: 450 })],
+      }),
+    });
+
+    fireEvent.press(screen.getByText("Registrar pago y terminar"));
+
+    await waitFor(() => expect(screen.getByLabelText("Monto total").props.value).toBe("1250"));
+    expect(screen.getByText("Los servicios elegidos suman $1250")).toBeTruthy();
+  });
+
+  it("sin servicios lo deja vacío para teclearlo", async () => {
+    await abrir("OWNER", { "/api/appointments/a1": cita({ status: "ARRIVED", type: "LASER", services: [] }) });
+
+    fireEvent.press(screen.getByText("Registrar pago y terminar"));
+
+    await waitFor(() => expect(screen.getByLabelText("Monto total").props.value).toBe(""));
   });
 });

@@ -134,7 +134,7 @@ describe("pestañas visibles según el rol", () => {
   it.each([
     ["OWNER", ["Resumen", "Faciales", "Láser", "Clínica"]],
     ["RECEPTION", ["Resumen", "Faciales", "Láser"]],
-    ["FACIALIST", ["Resumen", "Faciales"]],
+    ["FACIALIST", ["Resumen", "Faciales", "Clínica"]],
   ] as const)("%s ve %s", async (role, esperadas) => {
     await abrir(role);
 
@@ -154,11 +154,12 @@ describe("pestañas visibles según el rol", () => {
     expect(screen.queryByText("Clínica")).toBeNull();
   });
 
-  it("FACIALIST no ve ni Láser ni Clínica", async () => {
+  /** La facialista necesita la ficha de salud antes de un dermapen. */
+  it("FACIALIST ve Clínica pero no Láser", async () => {
     await abrir("FACIALIST");
 
+    expect(screen.getAllByText("Clínica").length).toBeGreaterThan(0);
     expect(screen.queryByText("Láser")).toBeNull();
-    expect(screen.queryByText("Clínica")).toBeNull();
   });
 });
 

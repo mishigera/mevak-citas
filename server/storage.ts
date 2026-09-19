@@ -49,6 +49,8 @@ export interface Service {
   name: string;
   type: AppointmentType;
   price: number;
+  /** Cuánto dura. Es lo que calcula la hora de fin al agendar; 60 si no se dice. */
+  durationMinutes?: number;
   isActive: boolean;
 }
 
@@ -142,6 +144,23 @@ export interface AvailabilityBlock {
   reason?: string;
 }
 
+/**
+ * El horario del centro, un registro por día de la semana.
+ *
+ * `id` es el propio día (`"0"` domingo … `"6"` sábado) para que la entidad sea un
+ * conjunto fijo de siete filas y no haya que buscarla por otro campo.
+ */
+export interface CenterHours {
+  id: string;
+  /** 0 = domingo … 6 = sábado. */
+  weekday: number;
+  /** `false` = el centro no abre ese día. */
+  open: boolean;
+  /** `"09:00"`. Sin sentido si `open` es `false`. */
+  opensAt: string;
+  closesAt: string;
+}
+
 export interface AuthToken {
   userId: string;
   role: Role;
@@ -228,6 +247,7 @@ class DbStorage {
   laserSessions = new PersistentMap<LaserSession>("laserSessions", this.schedulePersist.bind(this));
   payments = new PersistentMap<Payment>("payments", this.schedulePersist.bind(this));
   availabilityBlocks = new PersistentMap<AvailabilityBlock>("availabilityBlocks", this.schedulePersist.bind(this));
+  centerHours = new PersistentMap<CenterHours>("centerHours", this.schedulePersist.bind(this));
   tokens = new TokenMap(this.scheduleTokensPersist.bind(this));
 
   private persistQueue = new Set<string>();
@@ -257,6 +277,7 @@ class DbStorage {
       this.loadCollection("laserSessions", this.laserSessions),
       this.loadCollection("payments", this.payments),
       this.loadCollection("availabilityBlocks", this.availabilityBlocks),
+      this.loadCollection("centerHours", this.centerHours),
       this.loadTokens(),
     ]);
 
@@ -336,6 +357,21 @@ class DbStorage {
       this.users.set(admin.id, admin);
     }
 
+    if (!this.centerHours.size) {
+      // Lunes a viernes 9–19, sábado 9–15, domingo cerrado. Se cambia desde la app.
+      for (let weekday = 0; weekday < 7; weekday++) {
+        const cerrado = weekday === 0;
+        const sabado = weekday === 6;
+        this.centerHours.set(String(weekday), {
+          id: String(weekday),
+          weekday,
+          open: !cerrado,
+          opensAt: "09:00",
+          closesAt: sabado ? "15:00" : "19:00",
+        });
+      }
+    }
+
     if (!this.laserAreas.size) {
       const laserAreas: LaserArea[] = [
         { id: randomUUID(), name: "Cuello", bodySide: "front", bodyRegion: "torso", svgKey: "cuello", isActive: true },
@@ -408,6 +444,7 @@ class DbStorage {
         case "laserSessions": tasks.push(saveEntity("laserSessions", this.laserSessions.snapshotValues())); break;
         case "payments": tasks.push(saveEntity("payments", this.payments.snapshotValues())); break;
         case "availabilityBlocks": tasks.push(saveEntity("availabilityBlocks", this.availabilityBlocks.snapshotValues())); break;
+        case "centerHours": tasks.push(saveEntity("centerHours", this.centerHours.snapshotValues())); break;
         default:
           break;
       }

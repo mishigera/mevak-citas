@@ -211,9 +211,9 @@ describe("permisos por rol", () => {
    * La tabla debe coincidir con `tests/server/routes.permissions.test.ts`.
    */
   const esperado: Record<Role, Record<string, boolean>> = {
-    OWNER: { canViewClinical: true, canManageServices: true, canViewReports: true, canCreateBlocks: true, canManageAgenda: true, isOwner: true },
-    RECEPTION: { canViewClinical: false, canManageServices: false, canViewReports: false, canCreateBlocks: true, canManageAgenda: true, isOwner: false },
-    FACIALIST: { canViewClinical: false, canManageServices: false, canViewReports: false, canCreateBlocks: true, canManageAgenda: false, isOwner: false },
+    OWNER: { canViewClinical: true, canViewLaserClinical: true, canManageServices: true, canViewReports: true, canCreateBlocks: true, canManageAgenda: true, isOwner: true },
+    RECEPTION: { canViewClinical: false, canViewLaserClinical: false, canManageServices: false, canViewReports: false, canCreateBlocks: true, canManageAgenda: true, isOwner: false },
+    FACIALIST: { canViewClinical: true, canViewLaserClinical: false, canManageServices: false, canViewReports: false, canCreateBlocks: true, canManageAgenda: false, isOwner: false },
   };
 
   it.each(Object.keys(esperado) as Role[])("%s tiene los flags correctos", async (role) => {
@@ -234,6 +234,7 @@ describe("permisos por rol", () => {
     const { result } = await montar();
 
     expect(result.current.canViewClinical).toBe(false);
+    expect(result.current.canViewLaserClinical).toBe(false);
     expect(result.current.canManageServices).toBe(false);
     expect(result.current.canViewReports).toBe(false);
     expect(result.current.canCreateBlocks).toBe(false);

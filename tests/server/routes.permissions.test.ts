@@ -34,11 +34,12 @@ const CASOS: Caso[] = [
   { desc: "editar usuario", method: "patch", path: "/api/users/u1", permitidos: ["OWNER"],
     body: { name: "Y" } },
 
-  // Historia clínica: solo la dueña. RECEPTION no debe verla.
+  // Salud básica: la dueña y la facialista (las dos aplican tratamiento).
+  // RECEPTION nunca. El corte entre salud y datos de láser se prueba en routes.crud.
   { desc: "ver historia clínica", method: "get", path: "/api/clients/client-1/clinical",
-    permitidos: ["OWNER"] },
+    permitidos: ["OWNER", "FACIALIST"] },
   { desc: "editar historia clínica", method: "put", path: "/api/clients/client-1/clinical",
-    permitidos: ["OWNER"], body: { allergiesFlag: false, conditionsJson: {} } },
+    permitidos: ["OWNER", "FACIALIST"], body: { allergiesFlag: false, conditionsJson: {} } },
   { desc: "editar áreas de láser del cliente", method: "put",
     path: "/api/clients/client-1/laser-areas", permitidos: ["OWNER"], body: { areaIds: [] } },
 
@@ -69,7 +70,7 @@ const CASOS: Caso[] = [
   // Bloqueos: las tres. Recepción es quien agenda, tiene que poder cerrar el centro.
   { desc: "crear bloqueo", method: "post", path: "/api/blocks",
     permitidos: ["OWNER", "RECEPTION", "FACIALIST"],
-    body: { startDateTime: "2026-10-01T09:00:00.000Z", endDateTime: "2026-10-01T10:00:00.000Z" } },
+    body: { startDateTime: "2026-10-01T09:00:00", endDateTime: "2026-10-01T10:00:00" } },
 ];
 
 async function appConRoles() {

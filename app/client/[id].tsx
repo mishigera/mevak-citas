@@ -80,7 +80,7 @@ function authH() {
 export default function ClientDetailScreen() {
   const { id, tab: tabParam } = useLocalSearchParams<{ id: string; tab?: string }>();
   const qc = useQueryClient();
-  const { canViewClinical, user } = useAuth();
+  const { canViewClinical, canViewLaserClinical, user } = useAuth();
   const role = user?.role;
 
   /**
@@ -89,7 +89,7 @@ export default function ClientDetailScreen() {
    * Lo clínico sigue siendo solo de la dueña.
    */
   const availableTabs = useMemo(() => {
-    if (role === "FACIALIST") return ["Resumen", "Faciales"] as const;
+    if (role === "FACIALIST") return ["Resumen", "Faciales", "Clínica"] as const;
     if (role === "RECEPTION") return ["Resumen", "Faciales", "Láser"] as const;
     return ["Resumen", "Faciales", "Láser", "Clínica"] as const;
   }, [role]);
@@ -549,7 +549,7 @@ export default function ClientDetailScreen() {
                 <Ionicons name="pencil-outline" size={18} color={Colors.primary} />
               </PressableMotion>
             </View>
-            {clin.phototype && (
+            {canViewLaserClinical && clin.phototype && (
               <View style={styles.phototypeDisplay}>
                 <View style={[styles.phototypeCircle, { backgroundColor: PHOTOTYPES[clin.phototype - 1]?.skin }]} />
                 <Text style={styles.phototypeText}>Fototipo {clin.phototype}: {PHOTOTYPES[clin.phototype - 1]?.desc}</Text>
@@ -561,8 +561,8 @@ export default function ClientDetailScreen() {
             </View>
             {clin.medsText && <View style={styles.infoRow}><Text style={styles.infoLabel}>Medicamentos</Text><Text style={styles.infoValue}>{clin.medsText}</Text></View>}
             {clin.surgeriesText && <View style={styles.infoRow}><Text style={styles.infoLabel}>Cirugías</Text><Text style={styles.infoValue}>{clin.surgeriesText}</Text></View>}
-            {clin.eyeColor && <View style={styles.infoRow}><Text style={styles.infoLabel}>Color de ojos</Text><Text style={styles.infoValue}>{clin.eyeColor}</Text></View>}
-            {clin.hairColor && <View style={styles.infoRow}><Text style={styles.infoLabel}>Color de cabello</Text><Text style={styles.infoValue}>{clin.hairColor}</Text></View>}
+            {canViewLaserClinical && clin.eyeColor && <View style={styles.infoRow}><Text style={styles.infoLabel}>Color de ojos</Text><Text style={styles.infoValue}>{clin.eyeColor}</Text></View>}
+            {canViewLaserClinical && clin.hairColor && <View style={styles.infoRow}><Text style={styles.infoLabel}>Color de cabello</Text><Text style={styles.infoValue}>{clin.hairColor}</Text></View>}
             {clin.conditionsJson && (
               <>
                 <Text style={[styles.cardTitle, { fontSize: 13, marginTop: 8 }]}>Antecedentes médicos</Text>
@@ -584,6 +584,7 @@ export default function ClientDetailScreen() {
 
     return (
       <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        {canViewLaserClinical && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Fototipo de piel</Text>
           <View style={styles.phototypeGrid}>
@@ -601,6 +602,7 @@ export default function ClientDetailScreen() {
             ))}
           </View>
         </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Alergias</Text>
@@ -643,8 +645,9 @@ export default function ClientDetailScreen() {
           {([
             ["medsText", "Medicamentos actuales"],
             ["surgeriesText", "Cirugías previas"],
-            ["eyeColor", "Color de ojos"],
-            ["hairColor", "Color de cabello"],
+            ...(canViewLaserClinical
+              ? ([["eyeColor", "Color de ojos"], ["hairColor", "Color de cabello"]] as const)
+              : []),
           ] as const).map(([key, label]) => (
             <View key={key} style={styles.clinField}>
               <Text style={styles.clinFieldLabel}>{label}</Text>

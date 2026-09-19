@@ -174,6 +174,12 @@ export default function MoreScreen() {
               onPress={() => router.push("/admin/packages")}
             />
             <MenuItem
+              icon="time-outline"
+              label="Horario del centro"
+              sublabel="Días y horas en que se puede agendar"
+              onPress={() => router.push("/admin/horario")}
+            />
+            <MenuItem
               icon="people-outline"
               label="Usuarios"
               sublabel="Gestionar staff"

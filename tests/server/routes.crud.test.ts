@@ -194,27 +194,104 @@ describe("historia clínica", () => {
   });
 
   /**
-   * DEUDA §17 — inconsistencia real encontrada por estos tests.
-   * Al CREAR (routes.ts:184) el spread va después del clientId:
-   *   { id, clientId, ...req.body }        → el cuerpo PISA la URL
-   * Al ACTUALIZAR (routes.ts:180) es al revés:
-   *   Object.assign(profile, req.body, { clientId })  → la URL manda
+   * Deuda §17, cerrada en p005 fase C.
    *
-   * Consecuencia: se puede crear una historia clínica colgada de OTRO cliente.
-   * El test fija el comportamiento actual para que el arreglo sea deliberado.
+   * Al crear, el spread iba después del `clientId` (`{ id, clientId, ...req.body }`), así
+   * que un `clientId` en el cuerpo pisaba el de la URL y la ficha se creaba colgada de
+   * otra clienta —invisible desde esta, porque el GET filtra por `clientId`—. Son datos
+   * médicos y el fallo era silencioso.
    */
-  it("al CREAR, el clientId del cuerpo pisa el de la URL (inconsistencia conocida)", async () => {
+  it("al CREAR, manda el clientId de la URL y no el del cuerpo", async () => {
     const { app, storage, tokens } = await setup();
 
     const res = await as(app, tokens.OWNER).put("/api/clients/client-1/clinical", {
       clientId: "cliente-intruso", conditionsJson: {},
     });
 
-    expect(res.body.clientId).toBe("cliente-intruso");
-    // Y el perfil queda invisible para el cliente al que se le creó:
+    expect(res.body.clientId).toBe("client-1");
     const lectura = await as(app, tokens.OWNER).get("/api/clients/client-1/clinical");
-    expect(lectura.body).toBeNull();
+    expect(lectura.body.clientId).toBe("client-1");
     expect(storage.clinicalProfiles.size).toBe(1);
+  });
+
+  it("al ACTUALIZAR tampoco se puede cambiar de dueña", async () => {
+    const { app, tokens } = await setup();
+    await as(app, tokens.OWNER).put("/api/clients/client-1/clinical", { medsText: "Nada" });
+
+    const res = await as(app, tokens.OWNER).put("/api/clients/client-1/clinical", {
+      clientId: "cliente-intruso", medsText: "Ibuprofeno",
+    });
+
+    expect(res.body.clientId).toBe("client-1");
+  });
+
+  /** La facialista también pincha: un dermapen sin saber las alergias es un problema. */
+  describe("qué ve cada una de la ficha", () => {
+    const completa = {
+      allergiesFlag: true, allergiesText: "Penicilina", conditionsJson: { diabetes: true },
+      medsText: "Isotretinoína", surgeriesText: "Ninguna",
+      phototype: 3, eyeColor: "Café", hairColor: "Negro",
+    };
+
+    it("la facialista ve alergias, antecedentes y medicamentos", async () => {
+      const { app, tokens } = await setup();
+      await as(app, tokens.OWNER).put("/api/clients/client-1/clinical", completa);
+
+      const res = await as(app, tokens.FACIALIST).get("/api/clients/client-1/clinical");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        allergiesFlag: true, allergiesText: "Penicilina", medsText: "Isotretinoína",
+        conditionsJson: { diabetes: true },
+      });
+    });
+
+    it("la facialista NO ve los datos de láser", async () => {
+      const { app, tokens } = await setup();
+      await as(app, tokens.OWNER).put("/api/clients/client-1/clinical", completa);
+
+      const res = await as(app, tokens.FACIALIST).get("/api/clients/client-1/clinical");
+
+      expect(res.body.phototype).toBeUndefined();
+      expect(res.body.eyeColor).toBeUndefined();
+      expect(res.body.hairColor).toBeUndefined();
+    });
+
+    it("la dueña lo ve todo", async () => {
+      const { app, tokens } = await setup();
+      await as(app, tokens.OWNER).put("/api/clients/client-1/clinical", completa);
+
+      const res = await as(app, tokens.OWNER).get("/api/clients/client-1/clinical");
+
+      expect(res.body).toMatchObject({ phototype: 3, eyeColor: "Café", allergiesText: "Penicilina" });
+    });
+
+    it("la facialista escribe alergias", async () => {
+      const { app, tokens } = await setup();
+      const res = await as(app, tokens.FACIALIST).put("/api/clients/client-1/clinical", {
+        allergiesFlag: true, allergiesText: "Ácido glicólico",
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.allergiesText).toBe("Ácido glicólico");
+    });
+
+    it("lo que la facialista mande de láser se descarta", async () => {
+      const { app, storage, tokens } = await setup();
+      await as(app, tokens.OWNER).put("/api/clients/client-1/clinical", completa);
+
+      await as(app, tokens.FACIALIST).put("/api/clients/client-1/clinical", {
+        medsText: "Actualizado", phototype: 6, eyeColor: "Verde",
+      });
+
+      const guardada = storage.clinicalProfiles.snapshotValues()[0];
+      expect(guardada).toMatchObject({ medsText: "Actualizado", phototype: 3, eyeColor: "Café" });
+    });
+
+    it("recepción sigue sin ver nada", async () => {
+      const { app, tokens } = await setup();
+      expect((await as(app, tokens.RECEPTION).get("/api/clients/client-1/clinical")).status).toBe(403);
+    });
   });
 });
 
@@ -306,8 +383,8 @@ describe("paquetes del cliente", () => {
     const { app, tokens } = await setup({
       packages: [aPackage({ id: "pkg-1" })],
       clientPackages: [
-        aClientPackage({ id: "cp-viejo", clientId: "client-1", packageId: "pkg-1", startDate: "2026-01-01T00:00:00.000Z" }),
-        aClientPackage({ id: "cp-nuevo", clientId: "client-1", packageId: "pkg-1", startDate: "2026-09-01T00:00:00.000Z" }),
+        aClientPackage({ id: "cp-viejo", clientId: "client-1", packageId: "pkg-1", startDate: "2026-01-01T00:00:00" }),
+        aClientPackage({ id: "cp-nuevo", clientId: "client-1", packageId: "pkg-1", startDate: "2026-09-01T00:00:00" }),
       ],
     });
 
@@ -628,8 +705,8 @@ describe("bloqueos de disponibilidad", () => {
   it("crea el bloqueo a nombre de quien lo pide", async () => {
     const { app, tokens } = await setup();
     const res = await as(app, tokens.FACIALIST).post("/api/blocks", {
-      startDateTime: "2026-10-01T09:00:00.000Z",
-      endDateTime: "2026-10-01T13:00:00.000Z",
+      startDateTime: "2026-10-01T09:00:00",
+      endDateTime: "2026-10-01T13:00:00",
       reason: "Cita médica",
     });
 
@@ -639,9 +716,9 @@ describe("bloqueos de disponibilidad", () => {
 
   it.each([
     ["faltan fechas", {}, /faltan fechas/i],
-    ["fecha inválida", { startDateTime: "no-es-fecha", endDateTime: "2026-10-01T13:00:00.000Z" }, /formato de fecha/i],
-    ["fin anterior al inicio", { startDateTime: "2026-10-01T13:00:00.000Z", endDateTime: "2026-10-01T09:00:00.000Z" }, /mayor a inicio/i],
-    ["fin igual al inicio", { startDateTime: "2026-10-01T09:00:00.000Z", endDateTime: "2026-10-01T09:00:00.000Z" }, /mayor a inicio/i],
+    ["fecha inválida", { startDateTime: "no-es-fecha", endDateTime: "2026-10-01T13:00:00" }, /formato de fecha/i],
+    ["fin anterior al inicio", { startDateTime: "2026-10-01T13:00:00", endDateTime: "2026-10-01T09:00:00" }, /mayor a inicio/i],
+    ["fin igual al inicio", { startDateTime: "2026-10-01T09:00:00", endDateTime: "2026-10-01T09:00:00" }, /mayor a inicio/i],
   ])("400 si %s", async (_c, body, mensaje) => {
     const { app, tokens } = await setup();
     const res = await as(app, tokens.OWNER).post("/api/blocks", body);
@@ -761,5 +838,82 @@ describe("bloqueos de disponibilidad", () => {
 
       expect(res.body.userId).toBe("u-FACIALIST");
     });
+  });
+});
+
+describe("horario del centro", () => {
+  it("siembra los siete días, con el domingo cerrado", async () => {
+    const { app, tokens } = await setup();
+    const res = await as(app, tokens.RECEPTION).get("/api/center-hours");
+
+    expect(res.body).toHaveLength(7);
+    expect(res.body[0]).toMatchObject({ weekday: 0, open: false });
+    expect(res.body[1]).toMatchObject({ weekday: 1, open: true, opensAt: "09:00", closesAt: "19:00" });
+  });
+
+  it("lo ve todo el staff: es lo que limita al agendar", async () => {
+    const { app, tokens } = await setup();
+    for (const rol of ROLES) {
+      expect((await as(app, tokens[rol]).get("/api/center-hours")).status).toBe(200);
+    }
+  });
+
+  it("solo la dueña lo cambia", async () => {
+    const { app, tokens } = await setup();
+    const cambio = [{ weekday: 1, open: true, opensAt: "10:00", closesAt: "20:00" }];
+
+    expect((await as(app, tokens.RECEPTION).put("/api/center-hours", cambio)).status).toBe(403);
+    expect((await as(app, tokens.OWNER).put("/api/center-hours", cambio)).status).toBe(200);
+  });
+
+  it("guarda el cambio", async () => {
+    const { app, storage, tokens } = await setup();
+    await as(app, tokens.OWNER).put("/api/center-hours", [
+      { weekday: 0, open: true, opensAt: "11:00", closesAt: "15:00" },
+    ]);
+
+    expect(storage.centerHours.get("0")).toMatchObject({ open: true, opensAt: "11:00", closesAt: "15:00" });
+  });
+
+  it("400 si cierra antes de abrir", async () => {
+    const { app, tokens } = await setup();
+    const res = await as(app, tokens.OWNER).put("/api/center-hours", [
+      { weekday: 1, open: true, opensAt: "19:00", closesAt: "09:00" },
+    ]);
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/posterior a la de apertura/i);
+  });
+
+  it("400 con una hora que no existe", async () => {
+    const { app, tokens } = await setup();
+    const res = await as(app, tokens.OWNER).put("/api/center-hours", [
+      { weekday: 1, open: true, opensAt: "25:00", closesAt: "26:00" },
+    ]);
+
+    expect(res.status).toBe(400);
+  });
+
+  it("400 con un día que no es de la semana", async () => {
+    const { app, tokens } = await setup();
+    const res = await as(app, tokens.OWNER).put("/api/center-hours", [
+      { weekday: 9, open: true, opensAt: "09:00", closesAt: "19:00" },
+    ]);
+
+    expect(res.status).toBe(400);
+  });
+
+  it("400 si no llega una lista", async () => {
+    const { app, tokens } = await setup();
+    expect((await as(app, tokens.OWNER).put("/api/center-hours", { weekday: 1 })).status).toBe(400);
+  });
+
+  it("un día cerrado no necesita horas válidas", async () => {
+    const { app, tokens } = await setup();
+    const res = await as(app, tokens.OWNER).put("/api/center-hours", [
+      { weekday: 0, open: false, opensAt: "", closesAt: "" },
+    ]);
+
+    expect(res.status).toBe(200);
   });
 });

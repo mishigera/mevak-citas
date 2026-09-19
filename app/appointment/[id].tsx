@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
+  Linking,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import { fetch } from "expo/fetch";
 import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
 import { LaserBodyMap } from "@/components/LaserBodyMap";
+import { enlaceRecordatorio } from "@/lib/whatsapp";
 
 /**
  * Referencia estable para los `useQuery` sin datos todavía.
@@ -272,6 +274,22 @@ export default function AppointmentDetailScreen() {
     setShowPaymentForm(true);
   };
 
+  /** Abre WhatsApp con el recordatorio escrito. No manda nada solo. */
+  const recordarPorWhatsApp = () => {
+    const enlace = enlaceRecordatorio({
+      telefono: appt?.client?.phone || "",
+      nombre: appt?.client?.fullName,
+      fecha: new Date(appt.dateTimeStart).toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" }),
+      hora: formatTime(appt.dateTimeStart),
+    });
+    if (!enlace) {
+      Alert.alert("Sin teléfono válido", "La ficha de la clienta no tiene un teléfono al que escribir.");
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Linking.openURL(enlace).catch(() => Alert.alert("Error", "No se pudo abrir WhatsApp."));
+  };
+
   const handleReSchedule = () => {
     if (!appt) return;
     const dateStr = appt.dateTimeStart.split("T")[0];
@@ -378,6 +396,17 @@ export default function AppointmentDetailScreen() {
                 <Ionicons name="time-outline" size={20} color={Colors.primary} />
                 <Text style={styles.quickBtnText}>Historial rápido</Text>
               </PressableMotion>
+              {isScheduledOrArrived && !!appt.client?.phone && (
+                <PressableMotion
+                  gesto="sutil"
+                  accessibilityLabel="Recordar por WhatsApp"
+                  style={styles.quickBtn}
+                  onPress={recordarPorWhatsApp}
+                >
+                  <Ionicons name="logo-whatsapp" size={20} color={Colors.success} />
+                  <Text style={styles.quickBtnText}>Recordar por WhatsApp</Text>
+                </PressableMotion>
+              )}
               {appt.type === "LASER" && user?.role === "OWNER" && (
                 <PressableMotion gesto="sutil" style={styles.quickBtn} onPress={() => setShowLaserPowerModal(true)}>
                   <Ionicons name="flash-outline" size={20} color={Colors.secondary} />
