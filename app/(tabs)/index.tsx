@@ -1,262 +1,267 @@
-import React, { useCallback, useState, useMemo } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  RefreshControl,
-} from "react-native";
-import { router } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
-import { Ionicons } from "@expo/vector-icons";
+/**
+ * Inicio: el tablero de hoy (plan p008).
+ *
+ * Antes era el modo "Día" de la Agenda con una tira de días encima. Ahora dice, a cada
+ * una de las tres, qué pasa ahora, qué sigue y qué hay que hacer hoy. Otros días están
+ * en la Agenda.
+ *
+ * Cada sección vive en `components/inicio/` y las cuentas en `lib/inicio.ts`; aquí solo
+ * se piden los datos y se decide qué ve cada rol:
+ *
+ * | Sección          | Dueña          | Recepción      | Facialista |
+ * |------------------|----------------|----------------|------------|
+ * | Ahora/siguiente  | todo el centro | todo el centro | las suyas  |
+ * | Por atender      | + liquidar     | sin dinero     | lo suyo    |
+ * | Hoy              | + lo cobrado   | sin dinero     | lo suyo    |
+ * | Huecos           | todas          | todas          | los suyos  |
+ * | Cumpleaños       | sí             | sí             | sí         |
+ */
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import { Linking, RefreshControl, StyleSheet, View } from "react-native";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as Haptics from "expo-haptics";
 import { Colors } from "@/constants/colors";
-import { Blur, Radius, Space } from "@/constants/theme";
+import { Space } from "@/constants/theme";
 import { useAuth } from "@/contexts/auth";
 import { useBreakpoint } from "@/lib/responsive";
-import { ContentColumn, Screen, useScreenLayout } from "@/components/Screen";
-import { GlassCard, GlassIconButton, GlassSurface } from "@/components/glass";
-import { Entrar, Stagger } from "@/components/motion";
-import { CargandoLista, EstadoVacio } from "@/components/Estados";
-import * as Haptics from "expo-haptics";
-import { getApiUrl } from "@/lib/query-client";
-import { ahoraClave, claveDiaISO, claveDiaLocal, desdeClave, sumarDias } from "@/lib/fecha";
-import { fetch } from "expo/fetch";
-
-function formatTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  SCHEDULED: "Agendada",
-  ARRIVED: "Llegó",
-  NO_SHOW: "No llegó",
-  DONE: "Terminada",
-  CANCELLED: "Cancelada",
-};
-
-const DAY_NAMES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-
-function StatusBadge({ status }: { status: string }) {
-  const color = Colors.statusColors[status as keyof typeof Colors.statusColors] || Colors.textMuted;
-  return (
-    <View style={[styles.badge, { backgroundColor: color + "22", borderColor: color + "44" }]}>
-      <Text style={[styles.badgeText, { color }]}>{STATUS_LABELS[status] || status}</Text>
-    </View>
-  );
-}
-
-function AppointmentCard({ appt, onPress }: { appt: any; onPress: () => void }) {
-  const typeColor = appt.type === "LASER" ? Colors.secondary : Colors.accent;
-  return (
-    <GlassCard onPress={onPress} radius={Radius.card}>
-      <View style={styles.apptFila}>
-        <View style={styles.apptLeft}>
-          <Text style={styles.apptTime}>{formatTime(appt.dateTimeStart)}</Text>
-          <View style={[styles.typePill, { backgroundColor: typeColor + "28" }]}>
-            <Text style={[styles.typePillText, { color: typeColor }]}>
-              {appt.type === "LASER" ? "Láser" : "Facial"}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.apptDivider} />
-        <View style={styles.apptRight}>
-          <Text style={styles.apptClient} numberOfLines={1}>{appt.client?.fullName || "Cliente"}</Text>
-          <StatusBadge status={appt.status} />
-          {appt.staff && <Text style={styles.apptStaff} numberOfLines={1}>{appt.staff.name}</Text>}
-        </View>
-        <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-      </View>
-    </GlassCard>
-  );
-}
-
-function DayStrip({
-  selected,
-  onSelect,
-  appointmentDates,
-}: {
-  selected: string;
-  onSelect: (d: string) => void;
-  appointmentDates: Set<string>;
-}) {
-  const { isCompact } = useBreakpoint();
-  // En pantalla ancha cabe mas de una semana: se aprovecha en vez de dejar hueco.
-  const radio = isCompact ? 3 : 5;
-
-  const days = useMemo(() => {
-    const result = [];
-    const base = desdeClave(selected);
-    for (let i = -radio; i <= radio; i++) {
-      const d = new Date(base);
-      d.setDate(base.getDate() + i);
-      result.push(d);
-    }
-    return result;
-  }, [selected, radio]);
-
-  const mover = (días: number) => onSelect(sumarDias(selected, días));
-
-  return (
-    <GlassSurface tone="neutral" intensity={Blur.panel} radius={Radius.panel} style={styles.dayStrip}>
-      <Pressable onPress={() => mover(-1)} style={styles.dayNavBtn} hitSlop={6}>
-        <Ionicons name="chevron-back" size={20} color={Colors.primaryDark} />
-      </Pressable>
-      <View style={styles.dayStripContent}>
-        {days.map((d) => {
-          const key = claveDiaLocal(d);
-          const isSelected = key === selected;
-          const hasAppts = appointmentDates.has(key);
-          return (
-            <Pressable key={key} onPress={() => onSelect(key)} style={styles.dayCellBoton}>
-              {isSelected && (
-                <GlassSurface
-                  tone="pinkStrong"
-                  intensity={Blur.control}
-                  radius={Radius.tile}
-                  style={StyleSheet.absoluteFillObject}
-                  elevation="none"
-                />
-              )}
-              <Text style={[styles.dayName, isSelected && styles.dayNameSelected]}>{DAY_NAMES[d.getDay()]}</Text>
-              <Text style={[styles.dayNum, isSelected && styles.dayNumSelected]}>{d.getDate()}</Text>
-              <View style={[styles.dot, hasAppts && (isSelected ? styles.dotActive : styles.dotHas)]} />
-            </Pressable>
-          );
-        })}
-      </View>
-      <Pressable onPress={() => mover(1)} style={styles.dayNavBtn} hitSlop={6}>
-        <Ionicons name="chevron-forward" size={20} color={Colors.primaryDark} />
-      </Pressable>
-    </GlassSurface>
-  );
-}
+import { apiRequest, getErrorMessage } from "@/lib/query-client";
+import { alerta } from "@/lib/alerta";
+import { claveDiaLocal } from "@/lib/fecha";
+import { enlaceWhatsApp, textoCumpleanos } from "@/lib/whatsapp";
+import {
+  ahoraYSiguiente, citasVisibles, cumpleanosProximos, huecosLibres, resumenDelDia,
+  type BloqueoInicio, type CitaInicio, type ClienteCumple, type Cumpleanos as Cumple,
+  type HorarioDia, type Hueco, type Profesional,
+} from "@/lib/inicio";
+import { calcularAvisos, type PagoAviso } from "@/components/avisos/calcular";
+import { Screen, ScreenScroll } from "@/components/Screen";
+import { GlassIconButton } from "@/components/glass";
+import { AhoraYSiguiente } from "@/components/inicio/AhoraYSiguiente";
+import { Cumpleanos } from "@/components/inicio/Cumpleanos";
+import { HuecosHoy } from "@/components/inicio/HuecosHoy";
+import { PorAtender, avisosPorAtender } from "@/components/inicio/PorAtender";
+import { ResumenHoy, type CajaDia } from "@/components/inicio/ResumenHoy";
+import { NotaInicio, SeccionInicio } from "@/components/inicio/SeccionInicio";
+import { useReloj } from "@/components/inicio/useReloj";
 
 /**
- * La lista va en su propio componente porque `useScreenLayout()` solo tiene valor
- * dentro de `<Screen>`: es de ahi de donde salen los huecos que deja el chrome flotante.
+ * El `QueryClient` global no refresca nunca solo (`staleTime: Infinity`). Un tablero que
+ * la recepcionista deja abierto toda la mañana, mientras la facialista marca llegadas
+ * desde su teléfono, tiene que volver a preguntar. Solo mientras está a la vista.
  */
-function DayList({
-  appts,
-  isLoading,
-  refreshing,
-  onRefresh,
-}: {
-  appts: any[];
-  isLoading: boolean;
-  refreshing: boolean;
-  onRefresh: () => void;
-}) {
-  const { paddingTop, paddingBottom } = useScreenLayout();
+const REFRESCO_MS = 60_000;
 
-  return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={{ paddingTop, paddingBottom }}
-      showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-    >
-      <ContentColumn>
-        <Entrar style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Citas</Text>
-          <Text style={styles.apptCount}>
-            {appts.length} cita{appts.length !== 1 ? "s" : ""}
-          </Text>
-        </Entrar>
+// Constantes de módulo, no `= []`: un array nuevo en cada render dispara los `useMemo`
+// que dependen de él (deuda §18).
+const SIN_CITAS: CitaInicio[] = [];
+const SIN_BLOQUEOS: BloqueoInicio[] = [];
+const SIN_PAGOS: PagoAviso[] = [];
+const SIN_HORARIO: HorarioDia[] = [];
+const SIN_STAFF: Profesional[] = [];
+const SIN_CLIENTES: ClienteCumple[] = [];
 
-        {isLoading ? (
-          <CargandoLista filas={3} />
-        ) : appts.length === 0 ? (
-          <EstadoVacio icono="calendar-outline" titulo="Sin citas" texto="Toca + para agregar" />
-        ) : (
-          /* Escalonado: cada cita entra 60 ms después de la anterior. De la 11.ª en
-             adelante entran juntas, que si no la lista tarda una eternidad. */
-          <Stagger style={styles.list}>
-            {appts.map((a) => (
-              <AppointmentCard
-                key={a.id}
-                appt={a}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.push(`/appointment/${a.id}`);
-                }}
-              />
-            ))}
-          </Stagger>
-        )}
-      </ContentColumn>
-    </ScrollView>
-  );
+async function pedir<T>(ruta: string): Promise<T> {
+  return (await apiRequest("GET", ruta)).json();
 }
 
 export default function HomeScreen() {
-  const { user } = useAuth();
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(ahoraClave());
+  const { user, isOwner } = useAuth();
+  const qc = useQueryClient();
+  const { isExpanded } = useBreakpoint();
+  const ahora = useReloj();
+  const hoy = claveDiaLocal(ahora);
+  const rol = user?.role;
+  const esFacialista = rol === "FACIALIST";
 
-  const { data: appointments, isLoading, refetch } = useQuery<any[]>({
-    queryKey: ["/api/appointments", selectedDate],
-    queryFn: async () => {
-      const base = getApiUrl();
-      const url = new URL(`/api/appointments?date=${selectedDate}`, base);
-      const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${(await import("@/lib/query-client")).getAuthToken() || ""}` },
-      });
-      if (!res.ok) throw new Error("Error al cargar");
-      return res.json();
-    },
+  const [enfocada, setEnfocada] = useState(true);
+  const [refrescando, setRefrescando] = useState(false);
+  const intervalo = enfocada ? REFRESCO_MS : false;
+
+  // Las claves son las mismas que usan la campana, la Agenda, Reportes y Nueva cita:
+  // si una ya lo cargó, aquí no se vuelve a pedir.
+  const citasQ = useQuery<CitaInicio[]>({
+    queryKey: ["/api/appointments", hoy],
+    queryFn: () => pedir(`/api/appointments?date=${hoy}`),
+    enabled: !!user,
+    refetchInterval: intervalo,
+  });
+  const bloqueosQ = useQuery<BloqueoInicio[]>({
+    queryKey: ["/api/blocks"],
+    queryFn: () => pedir("/api/blocks"),
+    enabled: !!user,
+    refetchInterval: intervalo,
+  });
+  const pagosQ = useQuery<PagoAviso[]>({
+    queryKey: ["/api/payments/pending-facialist"],
+    queryFn: () => pedir("/api/payments/pending-facialist"),
+    enabled: !!user && isOwner,
+    refetchInterval: intervalo,
+  });
+  const cajaQ = useQuery<CajaDia>({
+    queryKey: ["/api/reports/income", `date=${hoy}`],
+    queryFn: () => pedir(`/api/reports/income?date=${hoy}`),
+    enabled: !!user && isOwner,
+    refetchInterval: intervalo,
+  });
+  const horarioQ = useQuery<HorarioDia[]>({
+    queryKey: ["/api/center-hours"],
+    queryFn: () => pedir("/api/center-hours"),
+    enabled: !!user,
+  });
+  const staffQ = useQuery<Profesional[]>({
+    queryKey: ["/api/users/staff"],
+    queryFn: () => pedir("/api/users/staff"),
+    enabled: !!user,
+  });
+  const clientesQ = useQuery<ClienteCumple[]>({
+    queryKey: ["/api/clients"],
+    queryFn: () => pedir("/api/clients"),
+    enabled: !!user,
   });
 
-  const { data: monthAppts } = useQuery<any[]>({
-    queryKey: ["/api/appointments", selectedDate.slice(0, 7)],
-    queryFn: async () => {
-      const base = getApiUrl();
-      const url = new URL(`/api/appointments?date=${selectedDate.slice(0, 8)}`, base);
-      const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${(await import("@/lib/query-client")).getAuthToken() || ""}` },
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data;
-    },
-  });
+  const todasLasCitas = citasQ.data ?? SIN_CITAS;
+  const bloqueos = bloqueosQ.data ?? SIN_BLOQUEOS;
+  const pagos = pagosQ.data ?? SIN_PAGOS;
+  const horario = horarioQ.data ?? SIN_HORARIO;
+  const staff = staffQ.data ?? SIN_STAFF;
+  const clientes = clientesQ.data ?? SIN_CLIENTES;
 
-  const appointmentDates = useMemo(() => {
-    const set = new Set<string>();
-    (monthAppts || []).forEach((a: any) => set.add(claveDiaISO(a.dateTimeStart)));
-    (appointments || []).forEach((a: any) => set.add(claveDiaISO(a.dateTimeStart)));
-    return set;
-  }, [monthAppts, appointments]);
+  const citas = useMemo(() => citasVisibles(todasLasCitas, rol, user?.id), [todasLasCitas, rol, user?.id]);
+  const datosAhora = useMemo(() => ahoraYSiguiente(citas, ahora), [citas, ahora]);
+  const resumen = useMemo(() => resumenDelDia(citas), [citas]);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await refetch();
-    setRefreshing(false);
-  }, [refetch]);
+  const avisos = useMemo(() => {
+    // A la facialista le importan sus bloqueos y los del centro, no los de la dueña.
+    const suyos = esFacialista ? bloqueos.filter((b) => b.userId === null || b.userId === user?.id) : bloqueos;
+    return avisosPorAtender(calcularAvisos({ citas, pagos: isOwner ? pagos : SIN_PAGOS, bloqueos: suyos, ahora }));
+  }, [citas, pagos, bloqueos, isOwner, esFacialista, user?.id, ahora]);
 
-  // Solo la facialista ve "sus" citas; la dueña y la recepcionista ven el día entero.
-  // Antes el filtro era "todo el mundo menos la dueña ve lo suyo", y como la
-  // recepcionista **nunca** es la profesional de una cita, su pantalla salía siempre
-  // vacía. Deuda §27.
-  const soloMias = user?.role === "FACIALIST";
-  const myAppts = useMemo(
-    () => (appointments || []).filter((a) => (soloMias ? a.staffId === user?.id : true)),
-    [appointments, soloMias, user?.id],
+  const huecos = useMemo(() => {
+    const profesionales = esFacialista ? staff.filter((p) => p.id === user?.id) : staff;
+    return huecosLibres({ dia: hoy, ahora, horario, profesionales, citas: todasLasCitas, bloqueos });
+  }, [esFacialista, staff, user?.id, hoy, ahora, horario, todasLasCitas, bloqueos]);
+
+  const cumpleanos = useMemo(() => cumpleanosProximos(clientes, hoy), [clientes, hoy]);
+
+  /**
+   * Lo que cambia a lo largo del día. `refetchQueries` se salta las consultas
+   * desactivadas, así que a quien no es la dueña no se le piden pagos ni caja.
+   */
+  const refrescarDia = useCallback(
+    () => Promise.all(
+      [["/api/appointments", hoy], ["/api/blocks"], ["/api/payments/pending-facialist"], ["/api/reports/income", `date=${hoy}`]]
+        .map((queryKey) => qc.refetchQueries({ queryKey, type: "active" })),
+    ),
+    [qc, hoy],
   );
 
-  const dateLabel = useMemo(() => {
-    const d = desdeClave(selectedDate);
-    const isToday = selectedDate === ahoraClave();
-    const label = d.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
-    return isToday ? `Hoy, ${label}` : label;
-  }, [selectedDate]);
+  // Al volver a la pestaña, datos frescos; al irse, se deja de preguntar. La primera
+  // vez no: las consultas acaban de salir y se pedirían dos veces.
+  const primeraVez = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      setEnfocada(true);
+      if (primeraVez.current) primeraVez.current = false;
+      else refrescarDia();
+      return () => setEnfocada(false);
+    }, [refrescarDia]),
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefrescando(true);
+    await Promise.all([
+      refrescarDia(),
+      qc.refetchQueries({ queryKey: ["/api/center-hours"], type: "active" }),
+      qc.refetchQueries({ queryKey: ["/api/users/staff"], type: "active" }),
+      qc.refetchQueries({ queryKey: ["/api/clients"], type: "active" }),
+    ]);
+    setRefrescando(false);
+  }, [refrescarDia, qc]);
+
+  const llegada = useMutation({
+    mutationFn: async (id: string) => (await apiRequest("PATCH", `/api/appointments/${id}`, { status: "ARRIVED" })).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/appointments"] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err) => alerta("No se pudo marcar la llegada", getErrorMessage(err)),
+  });
+
+  const abrirCita = useCallback((cita: CitaInicio) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/appointment/${cita.id}`);
+  }, []);
+
+  const agendarEnHueco = useCallback((profesional: Profesional, hueco: Hueco) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const params: Record<string, string> = { staffId: profesional.id, staffName: profesional.name, date: hoy, hora: hueco.inicio };
+    // La dueña es la laserista y la facialista hace faciales: se propone el tipo, y en
+    // Nueva cita se puede cambiar.
+    if (profesional.role === "OWNER") params.type = "LASER";
+    if (profesional.role === "FACIALIST") params.type = "FACIAL";
+    router.push({ pathname: "/appointment/new", params });
+  }, [hoy]);
+
+  const felicitar = useCallback((c: Cumple) => {
+    const enlace = enlaceWhatsApp(c.cliente.phone, textoCumpleanos({ nombre: c.cliente.fullName }));
+    if (!enlace) {
+      alerta("Sin teléfono válido", "La ficha de la clienta no tiene un teléfono al que escribir.");
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Linking.openURL(enlace).catch(() => alerta("Error", "No se pudo abrir WhatsApp."));
+  }, []);
+
+  const fecha = ahora.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+
+  const operacion = (
+    <>
+      {citasQ.isError ? (
+        <SeccionInicio titulo="Ahora">
+          <NotaInicio>No se pudieron cargar las citas de hoy. Desliza hacia abajo para reintentar.</NotaInicio>
+        </SeccionInicio>
+      ) : (
+        <AhoraYSiguiente
+          datos={datosAhora}
+          ahora={ahora}
+          cargando={citasQ.isLoading}
+          verProfesional={!esFacialista}
+          totalHoy={resumen.total}
+          marcando={llegada.isPending ? (llegada.variables ?? null) : null}
+          onLlego={(cita) => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            llegada.mutate(cita.id);
+          }}
+          onAbrir={abrirCita}
+          onVerAgenda={() => router.navigate("/(tabs)/calendar")}
+        />
+      )}
+      <PorAtender avisos={avisos} onAbrir={(ruta) => router.push(ruta as Href)} />
+      <ResumenHoy
+        resumen={resumen}
+        caja={isOwner ? cajaQ.data : undefined}
+        onVerCorte={isOwner ? () => router.push("/admin/reports") : undefined}
+      />
+      <HuecosHoy huecos={huecos} verNombre={!esFacialista} onElegir={agendarEnHueco} />
+    </>
+  );
+
+  const hayAdelanto = cumpleanos.length > 0;
+  const adelanto = (
+    <Cumpleanos
+      cumpleanos={cumpleanos}
+      hoy={hoy}
+      onAbrir={(id) => router.push(`/client/${id}`)}
+      onFelicitar={felicitar}
+    />
+  );
 
   return (
     <Screen
       avisos
-      title={`Hola, ${user?.name?.split(" ")[0]}`}
-      subtitle={dateLabel}
+      title={`Hola, ${user?.name?.split(" ")[0] ?? ""}`}
+      subtitle={`Hoy, ${fecha}`}
       action={
         <GlassIconButton
           name="add"
@@ -268,66 +273,29 @@ export default function HomeScreen() {
           }}
         />
       }
-      below={
-        <DayStrip
-          selected={selectedDate}
-          onSelect={(d) => {
-            Haptics.selectionAsync();
-            setSelectedDate(d);
-          }}
-          appointmentDates={appointmentDates}
-        />
-      }
     >
-      <DayList appts={myAppts} isLoading={isLoading} refreshing={refreshing} onRefresh={onRefresh} />
+      <ScreenScroll
+        testID="inicio"
+        refreshControl={<RefreshControl refreshing={refrescando} onRefresh={onRefresh} tintColor={Colors.primary} />}
+      >
+        {isExpanded && hayAdelanto ? (
+          <View style={styles.columnas}>
+            <View style={styles.columna}>{operacion}</View>
+            <View style={styles.columna}>{adelanto}</View>
+          </View>
+        ) : (
+          <View style={styles.pila}>
+            {operacion}
+            {adelanto}
+          </View>
+        )}
+      </ScreenScroll>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1 },
-
-  dayStrip: { flexDirection: "row", alignItems: "center", paddingHorizontal: Space.xs, paddingVertical: Space.sm },
-  dayNavBtn: { padding: Space.sm },
-  dayStripContent: { flex: 1, flexDirection: "row", gap: 2 },
-  dayCellBoton: {
-    // Flexible, no de ancho fijo: así las 7 (u 11) celdas siempre caben en el ancho
-    // que haya y no se corta la última.
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: Space.sm,
-    borderRadius: Radius.tile,
-  },
-  dayName: { fontFamily: "Nunito_600SemiBold", fontSize: 11, color: Colors.textSecondary },
-  dayNameSelected: { color: Colors.primaryDark },
-  dayNum: { fontFamily: "Nunito_700Bold", fontSize: 18, color: Colors.text, marginTop: 2 },
-  dayNumSelected: { color: Colors.primaryDark },
-  dot: { width: 5, height: 5, borderRadius: 3, marginTop: 3, backgroundColor: "transparent" },
-  dotHas: { backgroundColor: Colors.primary },
-  dotActive: { backgroundColor: Colors.primaryDark },
-
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: Space.md,
-    marginTop: Space.sm,
-    paddingHorizontal: Space.xs,
-  },
-  sectionTitle: { fontFamily: "Nunito_700Bold", fontSize: 16, color: Colors.text },
-  apptCount: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary },
-
-  list: { gap: Space.md },
-  apptFila: { flexDirection: "row", alignItems: "center", paddingRight: Space.md },
-  apptLeft: { paddingVertical: Space.lg, paddingLeft: Space.lg, paddingRight: Space.md, alignItems: "center", minWidth: 72 },
-  apptTime: { fontFamily: "Nunito_700Bold", fontSize: 16, color: Colors.text },
-  typePill: { marginTop: Space.xs, borderRadius: Radius.control, paddingHorizontal: Space.sm, paddingVertical: 2 },
-  typePillText: { fontFamily: "Nunito_700Bold", fontSize: 10 },
-  apptDivider: { width: 1, height: 50, backgroundColor: Colors.glass.strokeSoft },
-  apptRight: { flex: 1, paddingVertical: Space.md, paddingHorizontal: Space.md, gap: 3 },
-  apptClient: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.text },
-  apptStaff: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textSecondary },
-  badge: { alignSelf: "flex-start", borderRadius: Radius.control, paddingHorizontal: Space.sm, paddingVertical: 2, borderWidth: 1 },
-  badgeText: { fontFamily: "Nunito_700Bold", fontSize: 10 },
-
+  pila: { gap: Space.xl },
+  columnas: { flexDirection: "row", alignItems: "flex-start", gap: Space.xl },
+  columna: { flex: 1, minWidth: 0, gap: Space.xl },
 });

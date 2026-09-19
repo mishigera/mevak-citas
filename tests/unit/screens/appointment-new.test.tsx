@@ -6,7 +6,7 @@ import { screen, fireEvent, waitFor } from "@testing-library/react-native";
 import NewAppointmentScreen from "@/app/appointment/new";
 import {
   renderScreen, resetApi, mockApi, apiCalls, mockRouter, pressIcon,
-  __setAuthUser, __resetAuth, fixtures, elegirFecha, elegirHora,
+  __setAuthUser, __resetAuth, fixtures, elegirFecha, elegirHora, setRouteParams,
 } from "../../setup/screen-harness";
 
 let alertSpy: jest.SpyInstance;
@@ -407,5 +407,43 @@ describe("servicios y duración", () => {
     await abrir();
 
     expect(screen.getByText(/No hay servicios de facial en el catálogo/)).toBeTruthy();
+  });
+});
+
+// Plan p008: tocar un hueco del inicio abre Nueva cita con todo lo que ya se sabe.
+describe("desde un hueco del inicio", () => {
+  afterEach(() => setRouteParams({}));
+
+  it("llega con profesional, día y hora, y dura una hora de entrada", async () => {
+    setRouteParams({ staffId: "u2", staffName: "Lucía", date: "2026-11-05", hora: "12:30", type: "FACIAL" });
+    mockApi({ "POST /api/appointments": fixtures.cita({ id: "nueva" }) });
+    await abrir();
+    await elegirCliente("Ana Gómez");
+
+    fireEvent.press(screen.getByText("Crear cita"));
+
+    await waitFor(() => {
+      const post = apiCalls().find((c) => c.method === "POST");
+      expect(post?.body).toMatchObject({
+        dateTimeStart: "2026-11-05T12:30:00",
+        dateTimeEnd: "2026-11-05T13:30:00",
+        staffId: "u2",
+        type: "FACIAL",
+      });
+    });
+  });
+
+  it("una hora mal escrita no se usa: se queda en las 10:00", async () => {
+    setRouteParams({ staffId: "u2", staffName: "Lucía", date: "2026-11-05", hora: "mediodía" });
+    mockApi({ "POST /api/appointments": fixtures.cita({ id: "nueva" }) });
+    await abrir();
+    await elegirCliente("Ana Gómez");
+
+    fireEvent.press(screen.getByText("Crear cita"));
+
+    await waitFor(() => {
+      const post = apiCalls().find((c) => c.method === "POST");
+      expect(post?.body).toMatchObject({ dateTimeStart: "2026-11-05T10:00:00", dateTimeEnd: "2026-11-05T11:00:00" });
+    });
   });
 });

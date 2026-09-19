@@ -74,6 +74,12 @@ function Selector({
   );
 }
 
+/** `"12:30"` → `"13:30"`, sin pasar de las 23. La duración real la ponen los servicios. */
+function unaHoraDespues(hora: string): string {
+  const h = Math.min(Number(hora.slice(0, 2)) + 1, 23);
+  return `${String(h).padStart(2, "0")}:${hora.slice(3, 5)}`;
+}
+
 export default function NewAppointmentScreen() {
   const params = useLocalSearchParams();
   const qc = useQueryClient();
@@ -84,8 +90,10 @@ export default function NewAppointmentScreen() {
   const [staffName, setStaffName] = useState<string>(params.staffName as string || "");
   const [type, setType] = useState<"FACIAL" | "LASER">((params.type as "FACIAL" | "LASER") || "FACIAL");
   const [date, setDate] = useState<string>((params.date as string) || ahoraClave());
-  const [startTime, setStartTime] = useState<string>("10:00");
-  const [endTime, setEndTime] = useState<string>("11:00");
+  // Desde un hueco del inicio llega también la hora (plan p008).
+  const horaParam = typeof params.hora === "string" && /^\d{2}:\d{2}$/.test(params.hora) ? params.hora : null;
+  const [startTime, setStartTime] = useState<string>(horaParam ?? "10:00");
+  const [endTime, setEndTime] = useState<string>(horaParam ? unaHoraDespues(horaParam) : "11:00");
   const [notes, setNotes] = useState<string>("");
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [showClientPicker, setShowClientPicker] = useState(false);

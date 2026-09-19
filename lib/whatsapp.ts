@@ -1,5 +1,6 @@
 /**
- * El recordatorio de la cita por WhatsApp.
+ * Los mensajes de WhatsApp del centro: el recordatorio de la cita y los del inicio
+ * (cumpleaños; plan p008).
  *
  * No hay backend de notificaciones y este plan no añade ninguno: se abre WhatsApp con
  * el texto ya escrito y lo manda la persona. El no-show es el coste principal de un
@@ -41,7 +42,30 @@ export function textoRecordatorio({
     `Si necesitas cambiarla, contéstanos por aquí.`;
 }
 
-/** La URL que abre WhatsApp con el mensaje puesto, o `null` si el teléfono no sirve. */
+function primerNombre(nombre?: string | null): string {
+  return nombre?.trim().split(" ")[0] ?? "";
+}
+
+export function textoCumpleanos({
+  nombre,
+  centro = "Mevak Beauty Center",
+}: {
+  nombre?: string | null;
+  centro?: string;
+}): string {
+  const quien = primerNombre(nombre);
+  return `¡Feliz cumpleaños${quien ? `, ${quien}` : ""}! Todo el equipo de ${centro} te ` +
+    `desea un día precioso.`;
+}
+
+/** La URL que abre WhatsApp con ese mensaje puesto, o `null` si el teléfono no sirve. */
+export function enlaceWhatsApp(telefono: string | null | undefined, texto: string): string | null {
+  const numero = aNumeroWhatsApp(telefono ?? "");
+  if (!numero) return null;
+  return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
+}
+
+/** La URL que abre WhatsApp con el recordatorio puesto, o `null` si el teléfono no sirve. */
 export function enlaceRecordatorio(opciones: {
   telefono: string;
   nombre?: string | null;
@@ -49,7 +73,5 @@ export function enlaceRecordatorio(opciones: {
   hora: string;
   centro?: string;
 }): string | null {
-  const numero = aNumeroWhatsApp(opciones.telefono);
-  if (!numero) return null;
-  return `https://wa.me/${numero}?text=${encodeURIComponent(textoRecordatorio(opciones))}`;
+  return enlaceWhatsApp(opciones.telefono, textoRecordatorio(opciones));
 }
