@@ -626,7 +626,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/appointments/:id", requireAuth, (req, res) => {
     const appt = storage.appointments.get(paramId(req));
     if (!appt) return res.status(404).json({ message: "Not found" });
-    const { dateTimeStart, dateTimeEnd, staffId, status, notes, clientId, type } = req.body;
+    const { dateTimeStart, dateTimeEnd, staffId, status, notes, clientId, type, confirmed } = req.body;
+    if (confirmed !== undefined && typeof confirmed !== "boolean") {
+      return res.status(400).json({ message: "confirmed debe ser verdadero o falso" });
+    }
     // Reprogramar valida lo mismo que crear: antes el PATCH solo miraba las otras citas
     // y mover una encima de un bloqueo pasaba sin error (deuda §8).
     if (dateTimeStart || dateTimeEnd || staffId) {
@@ -644,6 +647,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
     }
+    // La clienta confirmó otra hora: moverla de inicio deja la cita sin confirmar.
+    if (dateTimeStart && dateTimeStart !== appt.dateTimeStart) delete appt.confirmedAt;
     if (dateTimeStart) appt.dateTimeStart = dateTimeStart;
     if (dateTimeEnd) appt.dateTimeEnd = dateTimeEnd;
     if (staffId) appt.staffId = staffId;
@@ -651,6 +656,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (notes !== undefined) appt.notes = notes;
     if (clientId) appt.clientId = clientId;
     if (type) appt.type = type;
+    // Después de mover: si en la misma petición se mueve y se confirma, queda confirmada.
+    if (confirmed === true) appt.confirmedAt = new Date().toISOString();
+    if (confirmed === false) delete appt.confirmedAt;
     storage.appointments.set(appt.id, appt);
     res.json(appt);
   });

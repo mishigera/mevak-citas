@@ -83,6 +83,19 @@ describe("cabecera de la cita", () => {
 
     expect(screen.getAllByText(etiqueta).length).toBeGreaterThan(0);
   });
+
+  // Plan p008: se confirma desde el inicio y aquí se ve.
+  it("dice si la clienta confirmó que viene", async () => {
+    await abrir("OWNER", { "/api/appointments/a1": cita({ confirmedAt: "2026-09-30T18:00:00.000Z" }) });
+
+    expect(screen.getByText("Confirmada")).toBeTruthy();
+  });
+
+  it("sin confirmar no dice nada", async () => {
+    await abrir();
+
+    expect(screen.queryByText("Confirmada")).toBeNull();
+  });
 });
 
 describe("cambio de estado", () => {

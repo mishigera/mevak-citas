@@ -439,3 +439,83 @@ describe("horario del centro", () => {
     expect(res.status).toBe(409);
   });
 });
+
+// Plan p008: confirmar las citas del día siguiente desde el inicio.
+describe("confirmar la cita", () => {
+  const patch = (app: Express, token: string, id: string, body: object) =>
+    request(app).patch(`/api/appointments/${id}`).set("Authorization", `Bearer ${token}`).send(body);
+
+  async function conCita(over: Record<string, unknown> = {}) {
+    const ctx = await setup({ appointments: [anAppointment({ id: "a1", staffId: STAFF, ...over })] });
+    return { ...ctx, recepcion: authAs(ctx.storage, "u-recepcion", "RECEPTION") };
+  }
+
+  it("recepción la marca confirmada, con la hora a la que se confirmó", async () => {
+    const { app, storage, recepcion } = await conCita();
+
+    const res = await patch(app, recepcion, "a1", { confirmed: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.confirmedAt).toEqual(expect.any(String));
+    expect(Number.isNaN(new Date(res.body.confirmedAt).getTime())).toBe(false);
+    expect(storage.appointments.get("a1")?.confirmedAt).toBe(res.body.confirmedAt);
+  });
+
+  it("sale en la lista del día, que es de donde la lee el inicio", async () => {
+    const { app, token } = await conCita({ confirmedAt: "2026-09-30T18:00:00.000Z" });
+
+    const res = await request(app).get("/api/appointments?date=2026-10-01").set("Authorization", `Bearer ${token}`);
+
+    expect(res.body[0].confirmedAt).toBe("2026-09-30T18:00:00.000Z");
+  });
+
+  it("se puede quitar", async () => {
+    const { app, storage, token } = await conCita({ confirmedAt: "2026-09-30T18:00:00.000Z" });
+
+    const res = await patch(app, token, "a1", { confirmed: false });
+
+    expect(res.body.confirmedAt).toBeUndefined();
+    expect(storage.appointments.get("a1")?.confirmedAt).toBeUndefined();
+  });
+
+  it("mover la cita de hora la deja sin confirmar: la clienta confirmó otra hora", async () => {
+    const { app, token } = await conCita({ confirmedAt: "2026-09-30T18:00:00.000Z" });
+
+    const res = await patch(app, token, "a1", {
+      dateTimeStart: "2026-10-01T12:00:00", dateTimeEnd: "2026-10-01T13:00:00",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.confirmedAt).toBeUndefined();
+  });
+
+  it("alargarla, cambiar las notas o marcar la llegada no la desconfirman", async () => {
+    const { app, token } = await conCita({ confirmedAt: "2026-09-30T18:00:00.000Z" });
+
+    await patch(app, token, "a1", { dateTimeEnd: "2026-10-01T11:30:00" });
+    await patch(app, token, "a1", { notes: "Trae su crema" });
+    const res = await patch(app, token, "a1", { status: "ARRIVED" });
+
+    expect(res.body.confirmedAt).toBe("2026-09-30T18:00:00.000Z");
+  });
+
+  it("si se mueve y se confirma a la vez, queda confirmada", async () => {
+    const { app, token } = await conCita();
+
+    const res = await patch(app, token, "a1", {
+      dateTimeStart: "2026-10-01T12:00:00", dateTimeEnd: "2026-10-01T13:00:00", confirmed: true,
+    });
+
+    expect(res.body.confirmedAt).toEqual(expect.any(String));
+  });
+
+  it("un valor que no es verdadero o falso se rechaza y no toca nada", async () => {
+    const { app, storage, token } = await conCita();
+
+    const res = await patch(app, token, "a1", { confirmed: "sí", notes: "no debería guardarse" });
+
+    expect(res.status).toBe(400);
+    expect(storage.appointments.get("a1")?.confirmedAt).toBeUndefined();
+    expect(storage.appointments.get("a1")?.notes).toBeUndefined();
+  });
+});

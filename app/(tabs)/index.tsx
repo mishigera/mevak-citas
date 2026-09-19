@@ -14,6 +14,7 @@
  * | Por atender      | + liquidar     | sin dinero     | lo suyo    |
  * | Hoy              | + lo cobrado   | sin dinero     | lo suyo    |
  * | Huecos           | todas          | todas          | los suyos  |
+ * | Confirmar mañana | sí             | sí             | —          |
  * | Cumpleaños       | sí             | sí             | sí         |
  */
 import React, { useCallback, useMemo, useRef, useState } from "react";
@@ -28,9 +29,10 @@ import { useBreakpoint } from "@/lib/responsive";
 import { apiRequest, getErrorMessage } from "@/lib/query-client";
 import { alerta } from "@/lib/alerta";
 import { claveDiaLocal } from "@/lib/fecha";
-import { enlaceWhatsApp, textoCumpleanos } from "@/lib/whatsapp";
+import { enlaceWhatsApp, textoConfirmacion, textoCumpleanos } from "@/lib/whatsapp";
 import {
-  ahoraYSiguiente, citasVisibles, cumpleanosProximos, huecosLibres, resumenDelDia,
+  ahoraYSiguiente, citasVisibles, cumpleanosProximos, diaConFecha, horaISO, huecosLibres,
+  nombreDia, resumenDelDia, siguienteDiaAbierto,
   type BloqueoInicio, type CitaInicio, type ClienteCumple, type Cumpleanos as Cumple,
   type HorarioDia, type Hueco, type Profesional,
 } from "@/lib/inicio";
@@ -38,6 +40,7 @@ import { calcularAvisos, type PagoAviso } from "@/components/avisos/calcular";
 import { Screen, ScreenScroll } from "@/components/Screen";
 import { GlassIconButton } from "@/components/glass";
 import { AhoraYSiguiente } from "@/components/inicio/AhoraYSiguiente";
+import { ConfirmarManana } from "@/components/inicio/ConfirmarManana";
 import { Cumpleanos } from "@/components/inicio/Cumpleanos";
 import { HuecosHoy } from "@/components/inicio/HuecosHoy";
 import { PorAtender, avisosPorAtender } from "@/components/inicio/PorAtender";
@@ -66,7 +69,7 @@ async function pedir<T>(ruta: string): Promise<T> {
 }
 
 export default function HomeScreen() {
-  const { user, isOwner } = useAuth();
+  const { user, isOwner, canManageAgenda } = useAuth();
   const qc = useQueryClient();
   const { isExpanded } = useBreakpoint();
   const ahora = useReloj();
@@ -120,6 +123,15 @@ export default function HomeScreen() {
     enabled: !!user,
   });
 
+  // "Mañana" es el siguiente día que abre el centro: un sábado, el lunes. Se espera al
+  // horario para no pedir primero el domingo y después el lunes.
+  const manana = useMemo(() => siguienteDiaAbierto(hoy, horarioQ.data ?? SIN_HORARIO), [hoy, horarioQ.data]);
+  const citasMananaQ = useQuery<CitaInicio[]>({
+    queryKey: ["/api/appointments", manana],
+    queryFn: () => pedir(`/api/appointments?date=${manana}`),
+    enabled: !!user && canManageAgenda && !!manana && !horarioQ.isLoading,
+  });
+
   const todasLasCitas = citasQ.data ?? SIN_CITAS;
   const bloqueos = bloqueosQ.data ?? SIN_BLOQUEOS;
   const pagos = pagosQ.data ?? SIN_PAGOS;
@@ -143,6 +155,11 @@ export default function HomeScreen() {
   }, [esFacialista, staff, user?.id, hoy, ahora, horario, todasLasCitas, bloqueos]);
 
   const cumpleanos = useMemo(() => cumpleanosProximos(clientes, hoy), [clientes, hoy]);
+
+  const porConfirmar = useMemo(
+    () => (citasMananaQ.data ?? SIN_CITAS).filter((c) => c.status === "SCHEDULED" || c.status === "ARRIVED"),
+    [citasMananaQ.data],
+  );
 
   /**
    * Lo que cambia a lo largo del día. `refetchQueries` se salta las consultas
@@ -187,6 +204,42 @@ export default function HomeScreen() {
     },
     onError: (err) => alerta("No se pudo marcar la llegada", getErrorMessage(err)),
   });
+
+  const confirmacion = useMutation({
+    mutationFn: async ({ id, confirmed }: { id: string; confirmed: boolean }) =>
+      (await apiRequest("PATCH", `/api/appointments/${id}`, { confirmed })).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/appointments"] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err) => alerta("No se pudo guardar la confirmación", getErrorMessage(err)),
+  });
+
+  const confirmar = useCallback((cita: CitaInicio, confirmed: boolean) => {
+    if (confirmed) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      confirmacion.mutate({ id: cita.id, confirmed });
+      return;
+    }
+    // Quitarla por un toque de más sería perder lo que dijo la clienta: se pregunta.
+    alerta("¿Quitar la confirmación?", `La cita de ${cita.client?.fullName ?? "la clienta"} quedará sin confirmar.`, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Quitar", style: "destructive", onPress: () => confirmacion.mutate({ id: cita.id, confirmed }) },
+    ]);
+  }, [confirmacion]);
+
+  const pedirConfirmacion = useCallback((cita: CitaInicio) => {
+    if (!manana) return;
+    const cuando = nombreDia(manana, hoy) === "mañana" ? "mañana" : `el ${diaConFecha(manana)}`;
+    const texto = textoConfirmacion({ nombre: cita.client?.fullName, cuando, hora: horaISO(cita.dateTimeStart) });
+    const enlace = enlaceWhatsApp(cita.client?.phone, texto);
+    if (!enlace) {
+      alerta("Sin teléfono válido", "La ficha de la clienta no tiene un teléfono al que escribir.");
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Linking.openURL(enlace).catch(() => alerta("Error", "No se pudo abrir WhatsApp."));
+  }, [manana, hoy]);
 
   const abrirCita = useCallback((cita: CitaInicio) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -247,14 +300,27 @@ export default function HomeScreen() {
     </>
   );
 
-  const hayAdelanto = cumpleanos.length > 0;
+  const hayAdelanto = cumpleanos.length > 0 || porConfirmar.length > 0;
   const adelanto = (
-    <Cumpleanos
-      cumpleanos={cumpleanos}
-      hoy={hoy}
-      onAbrir={(id) => router.push(`/client/${id}`)}
-      onFelicitar={felicitar}
-    />
+    <>
+      {canManageAgenda && manana && (
+        <ConfirmarManana
+          titulo={`Confirmar ${nombreDia(manana, hoy)}`}
+          citas={porConfirmar}
+          verProfesional
+          marcando={confirmacion.isPending ? (confirmacion.variables?.id ?? null) : null}
+          onConfirmar={confirmar}
+          onWhatsApp={pedirConfirmacion}
+          onAbrir={abrirCita}
+        />
+      )}
+      <Cumpleanos
+        cumpleanos={cumpleanos}
+        hoy={hoy}
+        onAbrir={(id) => router.push(`/client/${id}`)}
+        onFelicitar={felicitar}
+      />
+    </>
   );
 
   return (

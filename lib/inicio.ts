@@ -325,6 +325,17 @@ export function cumpleanosProximos(clientes: ClienteCumple[], hoy: string, dias 
 
 const DIAS_SEMANA = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 
+const MESES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+
+/** `"lunes 21 de septiembre"`. Sin la coma que mete `toLocaleDateString` en es-MX. */
+export function diaConFecha(dia: string): string {
+  const d = desdeClave(dia);
+  return `${DIAS_SEMANA[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
+}
+
 /** `"hoy"`, `"mañana"` o el nombre del día: `"el lunes"`. Para días de la semana que viene. */
 export function nombreDia(dia: string, hoy: string): string {
   if (dia === hoy) return "hoy";

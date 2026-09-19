@@ -100,6 +100,11 @@ export interface Appointment {
   type: AppointmentType;
   status: AppointmentStatus;
   notes?: string;
+  /**
+   * Cuándo confirmó la clienta que viene (ISO con zona). Lo marca una persona tras
+   * escribirle, no la app: no lee WhatsApp. Mover la cita de hora lo borra (plan p008).
+   */
+  confirmedAt?: string;
 }
 
 export interface AppointmentService {

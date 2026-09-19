@@ -1,6 +1,6 @@
 /**
  * Los mensajes de WhatsApp del centro: el recordatorio de la cita y los del inicio
- * (cumpleaños; plan p008).
+ * (confirmar citas y cumpleaños; plan p008).
  *
  * No hay backend de notificaciones y este plan no añade ninguno: se abre WhatsApp con
  * el texto ya escrito y lo manda la persona. El no-show es el coste principal de un
@@ -44,6 +44,27 @@ export function textoRecordatorio({
 
 function primerNombre(nombre?: string | null): string {
   return nombre?.trim().split(" ")[0] ?? "";
+}
+
+/**
+ * Pedir que confirme la cita del día siguiente que abre el centro (plan p008). La
+ * respuesta la lee una persona y marca la cita como confirmada a mano.
+ */
+export function textoConfirmacion({
+  nombre,
+  cuando,
+  hora,
+  centro = "Mevak Beauty Center",
+}: {
+  nombre?: string | null;
+  /** `"mañana"` o `"el lunes 21 de septiembre"`. */
+  cuando: string;
+  hora: string;
+  centro?: string;
+}): string {
+  const quien = primerNombre(nombre);
+  return `Hola${quien ? ` ${quien}` : ""}, te escribimos de ${centro}: tienes cita ${cuando} ` +
+    `a las ${hora}. ¿Nos confirmas que vienes? Si necesitas cambiarla, contéstanos por aquí.`;
 }
 
 export function textoCumpleanos({

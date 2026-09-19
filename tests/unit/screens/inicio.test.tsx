@@ -11,6 +11,7 @@ import React from "react";
 import { Alert, Linking } from "react-native";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react-native";
 import HomeScreen from "@/app/(tabs)/index";
+import { claveDiaLocal } from "@/lib/fecha";
 import type { Role } from "../../setup/auth-mock";
 import {
   renderScreen, resetApi, mockApi, apiCalls, mockRouter, pressIcon, setViewport, VIEWPORTS,
@@ -18,7 +19,9 @@ import {
 } from "../../setup/screen-harness";
 
 const LUNES = "2026-09-21";
+const MARTES = "2026-09-22";
 const DOMINGO = "2026-09-20";
+const SABADO = "2026-09-19";
 
 const HORARIO = [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
   weekday, open: weekday !== 0, opensAt: "09:00", closesAt: weekday === 6 ? "15:00" : "19:00",
@@ -29,15 +32,18 @@ const STAFF = [
   { id: "u2", name: "Lucía", role: "FACIALIST" },
 ];
 
-const cita = (id: string, desde: string, hasta: string, cliente: string, over: Record<string, unknown> = {}) => ({
+const citaEl = (dia: string, id: string, desde: string, hasta: string, cliente: string, over: Record<string, unknown> = {}) => ({
   ...fixtures.cita({ id, staffId: "u1", type: "LASER" }),
-  dateTimeStart: `${LUNES}T${desde}:00`,
-  dateTimeEnd: `${LUNES}T${hasta}:00`,
+  dateTimeStart: `${dia}T${desde}:00`,
+  dateTimeEnd: `${dia}T${hasta}:00`,
   client: fixtures.cliente({ id: `c-${id}`, fullName: cliente }),
   staff: { id: "u1", name: "Dueña" },
   services: [],
   ...over,
 });
+
+const cita = (id: string, desde: string, hasta: string, cliente: string, over: Record<string, unknown> = {}) =>
+  citaEl(LUNES, id, desde, hasta, cliente, over);
 
 const lucia = { staffId: "u2", type: "FACIAL", staff: { id: "u2", name: "Lucía" } };
 
@@ -60,16 +66,25 @@ function entrar(role: Role = "OWNER", id = "u1") {
   __setAuthUser({ id, name: "María Fernanda López", email: "a@m.test", role });
 }
 
+/** La misma ruta responde según el día que se pida. */
+const porDia = (dias: Record<string, unknown[]>) =>
+  (_: unknown, { search }: { search: string }) => dias[new URLSearchParams(search).get("date") ?? ""] ?? [];
+
+/**
+ * Las citas que se pasan como lista son las de hoy: el inicio también pide las de
+ * mañana, y sin esto le llegarían las mismas.
+ */
 function api(rutas: Record<string, unknown> = {}) {
+  const citas = rutas["/api/appointments"] ?? AGENDA;
   mockApi({
-    "/api/appointments": AGENDA,
+    "/api/appointments": Array.isArray(citas) ? porDia({ [claveDiaLocal(new Date())]: citas }) : citas,
     "/api/blocks": [],
     "/api/center-hours": HORARIO,
     "/api/users/staff": STAFF,
     "/api/clients": [],
     "/api/payments/pending-facialist": [],
     "/api/reports/income": CAJA,
-    ...rutas,
+    ...Object.fromEntries(Object.entries(rutas).filter(([ruta]) => ruta !== "/api/appointments")),
   });
 }
 
@@ -445,5 +460,117 @@ describe("cumpleaños", () => {
 
     await waitFor(() => expect(screen.getByTestId("inicio-cumpleanos")).toBeTruthy());
     expect(screen.getByText("Ana López")).toBeTruthy();
+  });
+});
+
+describe("confirmar las de mañana", () => {
+  const MANANA = [
+    citaEl(MARTES, "m1", "10:00", "11:00", "Rosa Paz", { confirmedAt: "2026-09-21T15:00:00.000Z" }),
+    citaEl(MARTES, "m2", "12:00", "13:00", "Eva Sol", { ...lucia, client: fixtures.cliente({ fullName: "Eva Sol", phone: "5551112222" }) }),
+    citaEl(MARTES, "m3", "16:00", "17:00", "Lía Mar", { status: "CANCELLED" }),
+  ];
+
+  const fechasPedidas = () =>
+    apiCalls().filter((c) => c.path === "/api/appointments").map((c) => new URLSearchParams(c.search).get("date"));
+
+  it("las del día siguiente, con cuántas están confirmadas; las canceladas no", async () => {
+    entrar("RECEPTION", "u-recepcion");
+    api({ "/api/appointments": porDia({ [LUNES]: AGENDA, [MARTES]: MANANA }) });
+    await abrir();
+
+    const lista = await waitFor(() => within(screen.getByTestId("inicio-confirmar")));
+    expect(lista.getByText("Confirmar mañana")).toBeTruthy();
+    expect(lista.getByText("1 de 2 confirmadas")).toBeTruthy();
+    expect(lista.getByText("Rosa Paz")).toBeTruthy();
+    expect(lista.getByText("12:00 · Facial · Lucía")).toBeTruthy();
+    expect(lista.queryByText("Lía Mar")).toBeNull();
+    expect(fechasPedidas()).toContain(MARTES);
+  });
+
+  it("\"Confirmar\" la marca en el servidor", async () => {
+    entrar();
+    api({ "/api/appointments": porDia({ [MARTES]: MANANA }), "PATCH /api/appointments/m2": { ok: true } });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByLabelText("Marcar confirmada la cita de Eva Sol")).toBeTruthy());
+    fireEvent.press(screen.getByLabelText("Marcar confirmada la cita de Eva Sol"));
+
+    await waitFor(() => {
+      const patch = apiCalls().find((c) => c.method === "PATCH");
+      expect(patch).toMatchObject({ path: "/api/appointments/m2", body: { confirmed: true } });
+    });
+  });
+
+  it("quitar una confirmación pregunta antes", async () => {
+    entrar();
+    api({ "/api/appointments": porDia({ [MARTES]: MANANA }), "PATCH /api/appointments/m1": { ok: true } });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByLabelText("Quitar la confirmación de Rosa Paz")).toBeTruthy());
+    fireEvent.press(screen.getByLabelText("Quitar la confirmación de Rosa Paz"));
+
+    expect(alertSpy).toHaveBeenCalledWith("¿Quitar la confirmación?", expect.stringContaining("Rosa Paz"), expect.any(Array));
+    expect(apiCalls().filter((c) => c.method === "PATCH")).toHaveLength(0);
+
+    const botones = alertSpy.mock.calls[0][2] as { text: string; onPress?: () => void }[];
+    botones.find((b) => b.text === "Quitar")!.onPress!();
+
+    await waitFor(() => {
+      const patch = apiCalls().find((c) => c.method === "PATCH");
+      expect(patch).toMatchObject({ path: "/api/appointments/m1", body: { confirmed: false } });
+    });
+  });
+
+  it("WhatsApp abre el mensaje que pide confirmar, con el día y la hora", async () => {
+    const openSpy = jest.spyOn(Linking, "openURL").mockResolvedValue(true as never);
+    entrar();
+    api({ "/api/appointments": porDia({ [MARTES]: MANANA }) });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByLabelText("Escribir a Eva Sol por WhatsApp")).toBeTruthy());
+    fireEvent.press(screen.getByLabelText("Escribir a Eva Sol por WhatsApp"));
+
+    const url = openSpy.mock.calls[0][0] as string;
+    expect(url).toMatch(/^https:\/\/wa\.me\/525551112222\?text=/);
+    expect(decodeURIComponent(url.split("text=")[1])).toBe(
+      "Hola Eva, te escribimos de Mevak Beauty Center: tienes cita mañana a las 12:00. " +
+      "¿Nos confirmas que vienes? Si necesitas cambiarla, contéstanos por aquí.",
+    );
+    openSpy.mockRestore();
+  });
+
+  it("un sábado son las del lunes: el domingo no abre", async () => {
+    jest.setSystemTime(new Date(`${SABADO}T10:00:00`));
+    const openSpy = jest.spyOn(Linking, "openURL").mockResolvedValue(true as never);
+    entrar();
+    api({ "/api/appointments": porDia({ [LUNES]: [citaEl(LUNES, "l1", "09:00", "10:00", "Rosa Paz")] }) });
+    await abrir();
+
+    const lista = await waitFor(() => within(screen.getByTestId("inicio-confirmar")));
+    expect(lista.getByText("Confirmar el lunes")).toBeTruthy();
+    expect(fechasPedidas()).not.toContain(DOMINGO);
+
+    fireEvent.press(screen.getByLabelText("Escribir a Rosa Paz por WhatsApp"));
+    expect(decodeURIComponent(openSpy.mock.calls[0][0] as string)).toContain("tienes cita el lunes 21 de septiembre a las 09:00");
+    openSpy.mockRestore();
+  });
+
+  it("la facialista no la ve ni la pide", async () => {
+    entrar("FACIALIST", "u2");
+    api({ "/api/appointments": porDia({ [LUNES]: AGENDA, [MARTES]: MANANA }) });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByText("Sofía Ruiz")).toBeTruthy());
+    expect(screen.queryByTestId("inicio-confirmar")).toBeNull();
+    expect(fechasPedidas()).not.toContain(MARTES);
+  });
+
+  it("sin citas mañana, la sección no sale", async () => {
+    entrar();
+    api({ "/api/appointments": porDia({ [LUNES]: AGENDA }) });
+    await abrir();
+
+    await waitFor(() => expect(fechasPedidas()).toContain(MARTES));
+    expect(screen.queryByTestId("inicio-confirmar")).toBeNull();
   });
 });

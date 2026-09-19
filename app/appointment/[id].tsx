@@ -390,8 +390,17 @@ export default function AppointmentDetailScreen() {
             <Text style={styles.bannerTime}>{formatTime(appt.dateTimeStart)} – {formatTime(appt.dateTimeEnd)}</Text>
             <Text style={styles.bannerDate}>{new Date(appt.dateTimeStart).toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "long" })}</Text>
           </View>
-          <View style={[styles.statusBadgeLarge, { backgroundColor: statusColor + "20", borderColor: statusColor + "50" }]}>
-            <Text style={[styles.statusBadgeLargeText, { color: statusColor }]}>{STATUS_LABELS[appt.status]}</Text>
+          <View style={styles.badges}>
+            <View style={[styles.statusBadgeLarge, { backgroundColor: statusColor + "20", borderColor: statusColor + "50" }]}>
+              <Text style={[styles.statusBadgeLargeText, { color: statusColor }]}>{STATUS_LABELS[appt.status]}</Text>
+            </View>
+            {/* Se marca desde el inicio, en "Confirmar mañana" (plan p008). */}
+            {!!appt.confirmedAt && (
+              <View style={[styles.statusBadgeLarge, styles.confirmada]}>
+                <Ionicons name="checkmark-done" size={13} color={Colors.success} />
+                <Text style={[styles.statusBadgeLargeText, { color: Colors.success }]}>Confirmada</Text>
+              </View>
+            )}
           </View>
         </Entrar>
 
@@ -855,6 +864,14 @@ const styles = StyleSheet.create({
   bannerDate: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textSecondary, textTransform: "capitalize" },
   statusBadgeLarge: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1 },
   statusBadgeLargeText: { fontFamily: "Nunito_700Bold", fontSize: 12 },
+  badges: { alignItems: "flex-end", gap: Space.xs },
+  confirmada: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: Colors.success + "20",
+    borderColor: Colors.success + "50",
+  },
   content: { gap: Space.md },
   card: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 10, borderWidth: 1, borderColor: Colors.border },
   cardTitle: { fontFamily: "Nunito_700Bold", fontSize: 15, color: Colors.text, marginBottom: 4 },

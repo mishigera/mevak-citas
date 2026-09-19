@@ -68,7 +68,7 @@ afterEach(() => {
   setViewport(VIEWPORTS.movil);
 });
 
-type Respuesta = unknown | ((body: unknown) => unknown);
+type Respuesta = unknown | ((body: unknown, peticion: { search: string }) => unknown);
 type Rutas = Record<string, Respuesta>;
 
 const rutasActivas: Rutas = {};
@@ -77,7 +77,8 @@ const llamadas: { method: string; path: string; search: string; body: unknown }[
 /**
  * Define qué responde la API. Las claves son `"GET /api/clients"` o solo `"/api/clients"`
  * (cualquier método). Gana la coincidencia más específica.
- * Un valor función recibe el cuerpo de la petición y devuelve la respuesta.
+ * Un valor función recibe el cuerpo de la petición y sus parámetros (`{ search }`, con
+ * el `?`), y devuelve la respuesta: así una misma ruta responde distinto según el día.
  * Para forzar un error: `{ __status: 500, message: "..." }`.
  */
 export function mockApi(rutas: Rutas) {
@@ -110,7 +111,7 @@ export function resetApi() {
     }
 
     const valor = typeof definicion === "function"
-      ? (definicion as (b: unknown) => unknown)(body)
+      ? (definicion as (b: unknown, p: { search: string }) => unknown)(body, { search: parsed.search })
       : definicion;
 
     const status = (valor as { __status?: number })?.__status;
