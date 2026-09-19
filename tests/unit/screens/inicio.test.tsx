@@ -84,6 +84,7 @@ function api(rutas: Record<string, unknown> = {}) {
     "/api/clients": [],
     "/api/payments/pending-facialist": [],
     "/api/reports/income": CAJA,
+    "/api/client-packages/idle": [],
     ...Object.fromEntries(Object.entries(rutas).filter(([ruta]) => ruta !== "/api/appointments")),
   });
 }
@@ -572,5 +573,81 @@ describe("confirmar las de mañana", () => {
 
     await waitFor(() => expect(fechasPedidas()).toContain(MARTES));
     expect(screen.queryByTestId("inicio-confirmar")).toBeNull();
+  });
+});
+
+describe("para reagendar", () => {
+  const SIN_AGENDAR = [
+    {
+      id: "cp1", clientId: "ana", totalSessions: 6, remainingSessions: 4, startDate: "2026-06-01T00:00:00",
+      client: { id: "ana", fullName: "Ana López", phone: "5551112222" },
+      package: { name: "Láser 6 sesiones" }, lastVisit: "2026-08-31T10:00:00",
+    },
+    {
+      id: "cp2", clientId: "eva", totalSessions: 6, remainingSessions: 1, startDate: "2026-09-01T00:00:00",
+      client: { id: "eva", fullName: "Eva Sol", phone: "5553334444" },
+      package: { name: "Láser 6 sesiones" }, lastVisit: null,
+    },
+  ];
+
+  it("las sesiones pagadas sin agendar, con lo que queda y cuándo vino", async () => {
+    entrar("RECEPTION", "u-recepcion");
+    api({ "/api/appointments": [], "/api/client-packages/idle": SIN_AGENDAR });
+    await abrir();
+
+    const lista = await waitFor(() => within(screen.getByTestId("inicio-reagendar")));
+    expect(lista.getByText("Le quedan 4 de 6 · vino hace 3 semanas")).toBeTruthy();
+    expect(lista.getByText("Le quedan 1 de 6 · aún no ha venido")).toBeTruthy();
+  });
+
+  it("\"Agendar\" abre Nueva cita de láser con la clienta y la laserista", async () => {
+    entrar();
+    api({ "/api/appointments": [], "/api/client-packages/idle": SIN_AGENDAR });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByLabelText("Agendar a Eva Sol")).toBeTruthy());
+    fireEvent.press(screen.getByLabelText("Agendar a Eva Sol"));
+
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: "/appointment/new",
+      params: { clientId: "eva", clientName: "Eva Sol", type: "LASER", staffId: "u1", staffName: "Dueña" },
+    });
+  });
+
+  it("WhatsApp le dice cuántas sesiones le quedan", async () => {
+    const openSpy = jest.spyOn(Linking, "openURL").mockResolvedValue(true as never);
+    entrar();
+    api({ "/api/appointments": [], "/api/client-packages/idle": SIN_AGENDAR });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByLabelText("Escribir a Ana López para reagendar")).toBeTruthy());
+    fireEvent.press(screen.getByLabelText("Escribir a Ana López para reagendar"));
+    fireEvent.press(screen.getByLabelText("Escribir a Eva Sol para reagendar"));
+
+    const textos = openSpy.mock.calls.map(([url]) => decodeURIComponent(String(url).split("text=")[1]));
+    expect(textos[0]).toContain("te quedan 4 sesiones de tu paquete");
+    expect(textos[1]).toContain("te queda 1 sesión de tu paquete");
+    openSpy.mockRestore();
+  });
+
+  it("tocar a la clienta abre su ficha", async () => {
+    entrar();
+    api({ "/api/appointments": [], "/api/client-packages/idle": SIN_AGENDAR });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByLabelText("Ver la ficha de Ana López")).toBeTruthy());
+    fireEvent.press(screen.getByLabelText("Ver la ficha de Ana López"));
+
+    expect(mockRouter.push).toHaveBeenCalledWith("/client/ana");
+  });
+
+  it("la facialista no la ve ni la pide", async () => {
+    entrar("FACIALIST", "u2");
+    api({ "/api/client-packages/idle": SIN_AGENDAR });
+    await abrir();
+
+    await waitFor(() => expect(screen.getByText("Sofía Ruiz")).toBeTruthy());
+    expect(screen.queryByTestId("inicio-reagendar")).toBeNull();
+    expect(apiCalls().map((c) => c.path)).not.toContain("/api/client-packages/idle");
   });
 });

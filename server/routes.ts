@@ -434,6 +434,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
+   * Paquetes con sesiones pagadas y ninguna cita de láser por delante (plan p008).
+   *
+   * Son sesiones que la clienta ya pagó y no está usando: el inicio se las enseña a
+   * recepción para llamarla. Primero las que llevan más tiempo sin venir; si nunca vino,
+   * cuenta desde que compró el paquete. No cuelga de `/api/clients/` para no competir
+   * con `/api/clients/:id`.
+   */
+  app.get("/api/client-packages/idle", requireRole("OWNER", "RECEPTION"), (req, res) => {
+    const ahora = Date.now();
+    const citas = Array.from(storage.appointments.values());
+    const conCitaPorDelante = new Set(
+      citas
+        .filter((a) => a.type === "LASER" && (a.status === "SCHEDULED" || a.status === "ARRIVED"))
+        .filter((a) => new Date(a.dateTimeEnd).getTime() >= ahora)
+        .map((a) => a.clientId),
+    );
+    const ultimaVisita = (clientId: string) =>
+      citas
+        .filter((a) => a.clientId === clientId && a.status === "DONE")
+        .map((a) => a.dateTimeStart)
+        .sort()
+        .pop() ?? null;
+
+    const inactivos = Array.from(storage.clientPackages.values())
+      .filter((cp) => cp.status === "ACTIVE" && cp.remainingSessions > 0 && !conCitaPorDelante.has(cp.clientId))
+      .flatMap((cp) => {
+        const client = storage.clients.get(cp.clientId);
+        if (!client) return [];
+        return [{
+          ...enrichClientPackage(cp)!,
+          client: { id: client.id, fullName: client.fullName, phone: client.phone },
+          lastVisit: ultimaVisita(cp.clientId),
+        }];
+      })
+      .sort((a, b) => (a.lastVisit ?? a.startDate).localeCompare(b.lastVisit ?? b.startDate));
+
+    res.json(inactivos);
+  });
+
+  /**
    * Vender un paquete registra el cobro.
    *
    * Antes solo creaba el `ClientPackage`, así que el importe no entraba en ningún lado:

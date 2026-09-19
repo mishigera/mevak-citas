@@ -5,7 +5,7 @@
  * dan lo mismo en cualquier zona horaria. El 19 de septiembre de 2026 es sábado.
  */
 import {
-  ahoraYSiguiente, citasVisibles, cumpleanosProximos, duracionTexto, horaISO, huecosLibres,
+  ahoraYSiguiente, citasVisibles, cumpleanosProximos, duracionTexto, haceCuanto, horaISO, huecosLibres,
   minutosEntre, nombreDia, resumenDelDia, siguienteDiaAbierto,
   type BloqueoInicio, type CitaInicio, type HorarioDia,
 } from "@/lib/inicio";
@@ -280,5 +280,25 @@ describe("cumpleaños", () => {
   it("sin un año creíble no dice la edad", () => {
     const r = cumpleanosProximos([cliente("sin-anio", "0001-09-19")], SABADO);
     expect(r[0].edad).toBeNull();
+  });
+});
+
+describe("hace cuánto", () => {
+  it.each([
+    [`${SABADO}T10:00:00`, "hoy"],
+    ["2026-09-18T10:00:00", "ayer"],
+    ["2026-09-14T10:00:00", "hace 5 días"],
+    ["2026-08-29T10:00:00", "hace 3 semanas"],
+    ["2026-07-10T10:00:00", "hace 2 meses"],
+    ["2025-09-01T10:00:00", "hace 1 año"],
+    ["2023-09-01T10:00:00", "hace 3 años"],
+  ])("%s → %s", (iso, texto) => {
+    expect(haceCuanto(iso, SABADO)).toBe(texto);
+  });
+
+  // Un ISO con zona (un pago) se lee en hora local, no por su prefijo UTC (ADR-0004).
+  it("un ISO con Z cuenta por su día local", () => {
+    const tarde = new Date(2026, 8, 18, 23, 30); // viernes 18 a las 23:30, hora local
+    expect(haceCuanto(tarde.toISOString(), SABADO)).toBe("ayer");
   });
 });

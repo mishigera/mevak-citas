@@ -15,6 +15,7 @@
  * | Hoy              | + lo cobrado   | sin dinero     | lo suyo    |
  * | Huecos           | todas          | todas          | los suyos  |
  * | Confirmar mañana | sí             | sí             | —          |
+ * | Para reagendar   | sí             | sí             | —          |
  * | Cumpleaños       | sí             | sí             | sí         |
  */
 import React, { useCallback, useMemo, useRef, useState } from "react";
@@ -29,7 +30,7 @@ import { useBreakpoint } from "@/lib/responsive";
 import { apiRequest, getErrorMessage } from "@/lib/query-client";
 import { alerta } from "@/lib/alerta";
 import { claveDiaLocal } from "@/lib/fecha";
-import { enlaceWhatsApp, textoConfirmacion, textoCumpleanos } from "@/lib/whatsapp";
+import { enlaceWhatsApp, textoConfirmacion, textoCumpleanos, textoReagendar } from "@/lib/whatsapp";
 import {
   ahoraYSiguiente, citasVisibles, cumpleanosProximos, diaConFecha, horaISO, huecosLibres,
   nombreDia, resumenDelDia, siguienteDiaAbierto,
@@ -43,6 +44,7 @@ import { AhoraYSiguiente } from "@/components/inicio/AhoraYSiguiente";
 import { ConfirmarManana } from "@/components/inicio/ConfirmarManana";
 import { Cumpleanos } from "@/components/inicio/Cumpleanos";
 import { HuecosHoy } from "@/components/inicio/HuecosHoy";
+import { ParaReagendar, type PaqueteSinAgendar } from "@/components/inicio/ParaReagendar";
 import { PorAtender, avisosPorAtender } from "@/components/inicio/PorAtender";
 import { ResumenHoy, type CajaDia } from "@/components/inicio/ResumenHoy";
 import { NotaInicio, SeccionInicio } from "@/components/inicio/SeccionInicio";
@@ -63,9 +65,21 @@ const SIN_PAGOS: PagoAviso[] = [];
 const SIN_HORARIO: HorarioDia[] = [];
 const SIN_STAFF: Profesional[] = [];
 const SIN_CLIENTES: ClienteCumple[] = [];
+const SIN_PAQUETES: PaqueteSinAgendar[] = [];
 
 async function pedir<T>(ruta: string): Promise<T> {
   return (await apiRequest("GET", ruta)).json();
+}
+
+/** Abre WhatsApp con el mensaje escrito; lo manda la persona desde su teléfono. */
+function abrirWhatsApp(telefono: string | null | undefined, texto: string) {
+  const enlace = enlaceWhatsApp(telefono, texto);
+  if (!enlace) {
+    alerta("Sin teléfono válido", "La ficha de la clienta no tiene un teléfono al que escribir.");
+    return;
+  }
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  Linking.openURL(enlace).catch(() => alerta("Error", "No se pudo abrir WhatsApp."));
 }
 
 export default function HomeScreen() {
@@ -132,12 +146,19 @@ export default function HomeScreen() {
     enabled: !!user && canManageAgenda && !!manana && !horarioQ.isLoading,
   });
 
+  const sinAgendarQ = useQuery<PaqueteSinAgendar[]>({
+    queryKey: ["/api/client-packages/idle"],
+    queryFn: () => pedir("/api/client-packages/idle"),
+    enabled: !!user && canManageAgenda,
+  });
+
   const todasLasCitas = citasQ.data ?? SIN_CITAS;
   const bloqueos = bloqueosQ.data ?? SIN_BLOQUEOS;
   const pagos = pagosQ.data ?? SIN_PAGOS;
   const horario = horarioQ.data ?? SIN_HORARIO;
   const staff = staffQ.data ?? SIN_STAFF;
   const clientes = clientesQ.data ?? SIN_CLIENTES;
+  const sinAgendar = sinAgendarQ.data ?? SIN_PAQUETES;
 
   const citas = useMemo(() => citasVisibles(todasLasCitas, rol, user?.id), [todasLasCitas, rol, user?.id]);
   const datosAhora = useMemo(() => ahoraYSiguiente(citas, ahora), [citas, ahora]);
@@ -164,11 +185,15 @@ export default function HomeScreen() {
   /**
    * Lo que cambia a lo largo del día. `refetchQueries` se salta las consultas
    * desactivadas, así que a quien no es la dueña no se le piden pagos ni caja.
+   * Los paquetes sin agendar van aquí porque Nueva cita no los invalida: al volver de
+   * agendar a una clienta, tiene que desaparecer de la lista.
    */
   const refrescarDia = useCallback(
     () => Promise.all(
-      [["/api/appointments", hoy], ["/api/blocks"], ["/api/payments/pending-facialist"], ["/api/reports/income", `date=${hoy}`]]
-        .map((queryKey) => qc.refetchQueries({ queryKey, type: "active" })),
+      [
+        ["/api/appointments", hoy], ["/api/blocks"], ["/api/payments/pending-facialist"],
+        ["/api/reports/income", `date=${hoy}`], ["/api/client-packages/idle"],
+      ].map((queryKey) => qc.refetchQueries({ queryKey, type: "active" })),
     ),
     [qc, hoy],
   );
@@ -231,15 +256,17 @@ export default function HomeScreen() {
   const pedirConfirmacion = useCallback((cita: CitaInicio) => {
     if (!manana) return;
     const cuando = nombreDia(manana, hoy) === "mañana" ? "mañana" : `el ${diaConFecha(manana)}`;
-    const texto = textoConfirmacion({ nombre: cita.client?.fullName, cuando, hora: horaISO(cita.dateTimeStart) });
-    const enlace = enlaceWhatsApp(cita.client?.phone, texto);
-    if (!enlace) {
-      alerta("Sin teléfono válido", "La ficha de la clienta no tiene un teléfono al que escribir.");
-      return;
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Linking.openURL(enlace).catch(() => alerta("Error", "No se pudo abrir WhatsApp."));
+    abrirWhatsApp(cita.client?.phone, textoConfirmacion({ nombre: cita.client?.fullName, cuando, hora: horaISO(cita.dateTimeStart) }));
   }, [manana, hoy]);
+
+  const agendarPaquete = useCallback((p: PaqueteSinAgendar) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const params: Record<string, string> = { clientId: p.client.id, clientName: p.client.fullName, type: "LASER" };
+    // Los paquetes son de láser y la laserista es la dueña.
+    const laserista = staff.find((s) => s.role === "OWNER");
+    if (laserista) Object.assign(params, { staffId: laserista.id, staffName: laserista.name });
+    router.push({ pathname: "/appointment/new", params });
+  }, [staff]);
 
   const abrirCita = useCallback((cita: CitaInicio) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -257,13 +284,7 @@ export default function HomeScreen() {
   }, [hoy]);
 
   const felicitar = useCallback((c: Cumple) => {
-    const enlace = enlaceWhatsApp(c.cliente.phone, textoCumpleanos({ nombre: c.cliente.fullName }));
-    if (!enlace) {
-      alerta("Sin teléfono válido", "La ficha de la clienta no tiene un teléfono al que escribir.");
-      return;
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Linking.openURL(enlace).catch(() => alerta("Error", "No se pudo abrir WhatsApp."));
+    abrirWhatsApp(c.cliente.phone, textoCumpleanos({ nombre: c.cliente.fullName }));
   }, []);
 
   const fecha = ahora.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
@@ -300,7 +321,7 @@ export default function HomeScreen() {
     </>
   );
 
-  const hayAdelanto = cumpleanos.length > 0 || porConfirmar.length > 0;
+  const hayAdelanto = cumpleanos.length > 0 || porConfirmar.length > 0 || sinAgendar.length > 0;
   const adelanto = (
     <>
       {canManageAgenda && manana && (
@@ -312,6 +333,15 @@ export default function HomeScreen() {
           onConfirmar={confirmar}
           onWhatsApp={pedirConfirmacion}
           onAbrir={abrirCita}
+        />
+      )}
+      {canManageAgenda && (
+        <ParaReagendar
+          paquetes={sinAgendar}
+          hoy={hoy}
+          onAbrir={(id) => router.push(`/client/${id}`)}
+          onWhatsApp={(p) => abrirWhatsApp(p.client.phone, textoReagendar({ nombre: p.client.fullName, restantes: p.remainingSessions }))}
+          onAgendar={agendarPaquete}
         />
       )}
       <Cumpleanos

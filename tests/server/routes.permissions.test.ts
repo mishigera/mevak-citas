@@ -69,6 +69,10 @@ const CASOS: Caso[] = [
   { desc: "ver reporte de ingresos", method: "get", path: "/api/reports/income",
     permitidos: ["OWNER"] },
 
+  // Inicio (p008): las sesiones pagadas sin agendar son para quien agenda.
+  { desc: "ver paquetes para reagendar", method: "get", path: "/api/client-packages/idle",
+    permitidos: ["OWNER", "RECEPTION"] },
+
   // Bloqueos: las tres. Recepción es quien agenda, tiene que poder cerrar el centro.
   { desc: "crear bloqueo", method: "post", path: "/api/blocks",
     permitidos: ["OWNER", "RECEPTION", "FACIALIST"],

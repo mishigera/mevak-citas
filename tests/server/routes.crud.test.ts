@@ -1097,3 +1097,107 @@ describe("duración de los servicios", () => {
     expect(res.status).toBe(400);
   });
 });
+
+// Plan p008: sesiones pagadas que nadie ha agendado, para el inicio.
+describe("paquetes para reagendar", () => {
+  const PASADO = "2020-03-10T10:00:00";
+  const FUTURO = "2030-03-10T10:00:00";
+  const FUTURO_FIN = "2030-03-10T11:00:00";
+
+  async function conPaquetes(clientPackages: unknown[], appointments: unknown[] = []) {
+    return setup({
+      clients: [
+        aClient({ id: "ana", fullName: "Ana López", phone: "5551112222" }),
+        aClient({ id: "eva", fullName: "Eva Sol", phone: "5553334444" }),
+      ],
+      packages: [aPackage({ id: "package-1", name: "Láser 6 sesiones" })],
+      clientPackages,
+      appointments,
+    });
+  }
+
+  it("la clienta con sesiones y ninguna cita por delante, con su última visita", async () => {
+    const { app, tokens } = await conPaquetes(
+      [aClientPackage({ id: "cp1", clientId: "ana", usedSessions: 2, remainingSessions: 4 })],
+      [
+        anAppointment({ clientId: "ana", type: "LASER", status: "DONE", dateTimeStart: "2020-01-05T10:00:00", dateTimeEnd: "2020-01-05T11:00:00" }),
+        anAppointment({ clientId: "ana", type: "LASER", status: "DONE", dateTimeStart: PASADO, dateTimeEnd: "2020-03-10T11:00:00" }),
+        anAppointment({ clientId: "ana", type: "LASER", status: "CANCELLED", dateTimeStart: "2020-06-01T10:00:00", dateTimeEnd: "2020-06-01T11:00:00" }),
+      ],
+    );
+
+    const res = await as(app, tokens.RECEPTION).get("/api/client-packages/idle");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({
+      id: "cp1",
+      remainingSessions: 4,
+      totalSessions: 6,
+      client: { id: "ana", fullName: "Ana López", phone: "5551112222" },
+      package: { name: "Láser 6 sesiones" },
+      lastVisit: PASADO,
+    });
+  });
+
+  it("no sale quien ya tiene una cita de láser agendada", async () => {
+    const { app, tokens } = await conPaquetes(
+      [aClientPackage({ clientId: "ana" })],
+      [anAppointment({ clientId: "ana", type: "LASER", dateTimeStart: FUTURO, dateTimeEnd: FUTURO_FIN })],
+    );
+
+    const res = await as(app, tokens.OWNER).get("/api/client-packages/idle");
+
+    expect(res.body).toEqual([]);
+  });
+
+  it("una cita facial no cuenta: el paquete sigue sin usarse", async () => {
+    const { app, tokens } = await conPaquetes(
+      [aClientPackage({ clientId: "ana" })],
+      [anAppointment({ clientId: "ana", type: "FACIAL", dateTimeStart: FUTURO, dateTimeEnd: FUTURO_FIN })],
+    );
+
+    const res = await as(app, tokens.OWNER).get("/api/client-packages/idle");
+
+    expect(res.body).toHaveLength(1);
+  });
+
+  it("una cita vieja que nadie cerró tampoco cuenta como cita por delante", async () => {
+    const { app, tokens } = await conPaquetes(
+      [aClientPackage({ clientId: "ana" })],
+      [anAppointment({ clientId: "ana", type: "LASER", status: "SCHEDULED", dateTimeStart: PASADO, dateTimeEnd: "2020-03-10T11:00:00" })],
+    );
+
+    const res = await as(app, tokens.OWNER).get("/api/client-packages/idle");
+
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].lastVisit).toBeNull();
+  });
+
+  it("solo paquetes activos con sesiones", async () => {
+    const { app, tokens } = await conPaquetes([
+      aClientPackage({ clientId: "ana", status: "FINISHED", usedSessions: 6, remainingSessions: 0 }),
+      aClientPackage({ clientId: "ana", status: "PAUSED" }),
+      aClientPackage({ clientId: "eva", status: "ACTIVE", usedSessions: 6, remainingSessions: 0 }),
+    ]);
+
+    const res = await as(app, tokens.OWNER).get("/api/client-packages/idle");
+
+    expect(res.body).toEqual([]);
+  });
+
+  it("primero quien lleva más sin venir; si nunca vino, cuenta desde la compra", async () => {
+    const { app, tokens } = await conPaquetes(
+      [
+        aClientPackage({ id: "de-ana", clientId: "ana", startDate: "2019-01-01T00:00:00" }),
+        aClientPackage({ id: "de-eva", clientId: "eva", startDate: "2019-06-01T00:00:00" }),
+      ],
+      [anAppointment({ clientId: "ana", type: "LASER", status: "DONE", dateTimeStart: PASADO, dateTimeEnd: "2020-03-10T11:00:00" })],
+    );
+
+    const res = await as(app, tokens.OWNER).get("/api/client-packages/idle");
+
+    // Eva nunca vino y compró en junio de 2019; Ana vino por última vez en marzo de 2020.
+    expect(res.body.map((p: { id: string }) => p.id)).toEqual(["de-eva", "de-ana"]);
+  });
+});

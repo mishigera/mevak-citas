@@ -10,7 +10,7 @@
  * (`"2026-09-19T10:00:00"`): `new Date()` los lee como locales, que es lo que son. El
  * día, como en toda la app, sale de `lib/fecha.ts` y nunca de `toISOString()` (ADR-0004).
  */
-import { claveDiaLocal, desdeClave, sumarDias } from "@/lib/fecha";
+import { claveDiaISO, claveDiaLocal, desdeClave, sumarDias } from "@/lib/fecha";
 
 export type CitaInicio = {
   id: string;
@@ -341,4 +341,19 @@ export function nombreDia(dia: string, hoy: string): string {
   if (dia === hoy) return "hoy";
   if (dia === sumarDias(hoy, 1)) return "mañana";
   return `el ${DIAS_SEMANA[desdeClave(dia).getDay()]}`;
+}
+
+/**
+ * Cuánto hace de un día, como lo diría una persona: `"hoy"`, `"ayer"`, `"hace 5 días"`,
+ * `"hace 3 semanas"`, `"hace 2 meses"`, `"hace 1 año"`. Cuenta días de calendario, no horas.
+ */
+export function haceCuanto(iso: string, hoy: string): string {
+  const dias = Math.round((desdeClave(hoy).getTime() - desdeClave(claveDiaISO(iso)).getTime()) / (24 * 60 * MINUTO));
+  if (dias <= 0) return "hoy";
+  if (dias === 1) return "ayer";
+  if (dias < 14) return `hace ${dias} días`;
+  if (dias < 60) return `hace ${Math.floor(dias / 7)} semanas`;
+  if (dias < 365) return `hace ${Math.floor(dias / 30)} meses`;
+  const anios = Math.floor(dias / 365);
+  return `hace ${anios} ${anios === 1 ? "año" : "años"}`;
 }
