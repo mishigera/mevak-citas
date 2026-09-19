@@ -4,7 +4,8 @@ import { apiRequest, setAuthToken, getApiUrl, getAuthToken } from "@/lib/query-c
 import { fetch } from "expo/fetch";
 import { queryClient } from "@/lib/query-client";
 
-export type Role = "ADMIN" | "OWNER" | "RECEPTION" | "FACIALIST";
+/** Tres roles para tres personas. `ADMIN` se fundió en `OWNER`: ver ADR-0005. */
+export type Role = "OWNER" | "RECEPTION" | "FACIALIST";
 
 export interface AuthUser {
   id: string;
@@ -22,7 +23,9 @@ interface AuthContextValue {
   canManageServices: boolean;
   canViewReports: boolean;
   canCreateBlocks: boolean;
-  isOwnerOrAdmin: boolean;
+  /** Bloquear la agenda de otra persona o cerrar el centro: la dueña y recepción. */
+  canManageAgenda: boolean;
+  isOwner: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -97,11 +100,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     login,
     logout,
-    canViewClinical: user?.role === "ADMIN" || user?.role === "OWNER",
-    canManageServices: user?.role === "ADMIN",
-    canViewReports: user?.role === "ADMIN" || user?.role === "OWNER",
-    canCreateBlocks: user?.role === "ADMIN" || user?.role === "OWNER" || user?.role === "FACIALIST",
-    isOwnerOrAdmin: user?.role === "ADMIN" || user?.role === "OWNER",
+    canViewClinical: user?.role === "OWNER",
+    canManageServices: user?.role === "OWNER",
+    canViewReports: user?.role === "OWNER",
+    // Las tres bloquean: la facialista la suya, la dueña y recepción también las demás.
+    canCreateBlocks: !!user,
+    canManageAgenda: user?.role === "OWNER" || user?.role === "RECEPTION",
+    isOwner: user?.role === "OWNER",
   }), [user, isLoading]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -29,14 +29,11 @@ import { Flotar, PressableMotion, Pop, Stagger } from "@/components/motion";
 import { ShimmerTarjeta } from "@/components/motion/Shimmer";
 import { agruparPorDia, calcularAvisos, type Aviso, type BloqueoAviso, type CitaAviso, type PagoAviso } from "./calcular";
 import { useAvisosLeidos } from "./leidos";
+import { ahoraClave } from "@/lib/fecha";
 
 const DIAMETRO = 44;
 /** Cuánto tarda un aviso recién visto en apagar su punto. */
 const MARCAR_TRAS = 1200;
-
-function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 const web = StyleSheet.create({
   // La campana suena cuando llega algo nuevo: rotación amortiguada, no un meneo suelto.
@@ -82,12 +79,12 @@ const web = StyleSheet.create({
 });
 
 export function CampanaAvisos() {
-  const { user, isOwnerOrAdmin } = useAuth();
+  const { user, isOwner } = useAuth();
   const layout = useBreakpoint();
   const { movimientoReducido } = useMotionPreferences();
   const [abierto, setAbierto] = useState(false);
   const refCampana = useRef<View | null>(null);
-  const hoy = hoyISO();
+  const hoy = ahoraClave();
 
   // Misma clave que usa la pantalla de inicio: si ya cargó las citas de hoy, esto no
   // dispara una segunda petición.
@@ -103,7 +100,7 @@ export function CampanaAvisos() {
   const pagos = useQuery<PagoAviso[]>({
     queryKey: ["/api/payments/pending-facialist"],
     queryFn: async () => (await apiRequest("GET", "/api/payments/pending-facialist")).json(),
-    enabled: !!user && isOwnerOrAdmin,
+    enabled: !!user && isOwner,
   });
 
   const bloqueos = useQuery<BloqueoAviso[]>({
@@ -154,11 +151,11 @@ export function CampanaAvisos() {
       if (!v) {
         citas.refetch();
         bloqueos.refetch();
-        if (isOwnerOrAdmin) pagos.refetch();
+        if (isOwner) pagos.refetch();
       }
       return !v;
     });
-  }, [citas, bloqueos, pagos, isOwnerOrAdmin]);
+  }, [citas, bloqueos, pagos, isOwner]);
 
   const abrirAviso = useCallback((aviso: Aviso) => {
     setAbierto(false);

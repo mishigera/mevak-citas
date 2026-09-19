@@ -8,7 +8,7 @@ import BlocksScreen from "@/app/blocks";
 import UsersScreen from "@/app/admin/users";
 import {
   renderScreen, resetApi, mockApi, apiCalls, mockRouter, pressIcon,
-  __setAuthUser, __resetAuth, fixtures,
+  __setAuthUser, __resetAuth, fixtures, elegirFecha, elegirHora,
 } from "../../setup/screen-harness";
 
 let alertSpy: jest.SpyInstance;
@@ -16,7 +16,7 @@ let alertSpy: jest.SpyInstance;
 beforeEach(() => {
   resetApi();
   __resetAuth();
-  __setAuthUser({ id: "u1", name: "Jefa", email: "a@m.test", role: "ADMIN" });
+  __setAuthUser({ id: "u1", name: "Jefa", email: "a@m.test", role: "OWNER" });
   Object.values(mockRouter).forEach((m) => typeof m.mockClear === "function" && m.mockClear());
   mockRouter.canGoBack.mockReturnValue(true);
   alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
@@ -176,13 +176,11 @@ describe("bloqueos de disponibilidad", () => {
 
   const abrirFormulario = () => pressIcon("add");
 
-  const rellenarBloqueo = () => {
-    const fechas = screen.getAllByPlaceholderText("YYYY-MM-DD");
-    const horas = screen.getAllByPlaceholderText("HH:MM");
-    fireEvent.changeText(fechas[0], "2026-11-01");
-    fireEvent.changeText(horas[0], "09:00");
-    fireEvent.changeText(fechas[1], "2026-11-01");
-    fireEvent.changeText(horas[1], "13:00");
+  const rellenarBloqueo = async () => {
+    await elegirFecha("Fecha inicio", "2026-11-01");
+    await elegirHora("Hora inicio", "09:00");
+    await elegirFecha("Fecha fin", "2026-11-01");
+    await elegirHora("Hora fin", "13:00");
   };
 
   it("avisa cuando no hay bloqueos", async () => {
@@ -204,7 +202,7 @@ describe("bloqueos de disponibilidad", () => {
     mockApi({ "/api/blocks": [bloqueo({ reason: undefined })] });
     renderScreen(<BlocksScreen />);
 
-    await waitFor(() => expect(screen.getByText("Mis bloqueos")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Mi agenda")).toBeTruthy());
     expect(screen.queryByText("Vacaciones")).toBeNull();
   });
 
@@ -213,7 +211,7 @@ describe("bloqueos de disponibilidad", () => {
     renderScreen(<BlocksScreen />);
     await waitFor(() => expect(screen.getByText("Sin bloqueos")).toBeTruthy());
     abrirFormulario();
-    rellenarBloqueo();
+    await rellenarBloqueo();
 
     fireEvent.press(screen.getByText("Guardar bloqueo"));
 
@@ -231,7 +229,7 @@ describe("bloqueos de disponibilidad", () => {
     renderScreen(<BlocksScreen />);
     await waitFor(() => expect(screen.getByText("Sin bloqueos")).toBeTruthy());
     abrirFormulario();
-    rellenarBloqueo();
+    await rellenarBloqueo();
     fireEvent.changeText(screen.getByPlaceholderText("Ej: Vacaciones, no trabajo"), "  Congreso  ");
 
     fireEvent.press(screen.getByText("Guardar bloqueo"));
@@ -250,7 +248,7 @@ describe("bloqueos de disponibilidad", () => {
     renderScreen(<BlocksScreen />);
     await waitFor(() => expect(screen.getByText("Sin bloqueos")).toBeTruthy());
     abrirFormulario();
-    rellenarBloqueo();
+    await rellenarBloqueo();
 
     fireEvent.press(screen.getByText("Guardar bloqueo"));
 
@@ -298,7 +296,7 @@ describe("bloqueos de disponibilidad", () => {
 // ---------------------------------------------------------------- Usuarios
 describe("gestión de usuarios", () => {
   const usuarios = [
-    fixtures.staff({ id: "u1", name: "Jefa", role: "ADMIN" }),
+    fixtures.staff({ id: "u1", name: "Jefa", role: "OWNER" }),
     fixtures.staff({ id: "u2", name: "Lucía", role: "FACIALIST", email: "lucia@m.test" }),
     fixtures.staff({ id: "u3", name: "Bea", role: "RECEPTION", isActive: false }),
   ];

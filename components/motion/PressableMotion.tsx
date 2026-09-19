@@ -41,6 +41,8 @@ export type PressableMotionProps = {
   accessibilityLabel?: string;
   accessibilityState?: { selected?: boolean; disabled?: boolean; expanded?: boolean };
   accessibilityHasPopup?: boolean;
+  /** El valor actual del control, aparte de su etiqueta (un selector de fecha, p. ej.). */
+  accessibilityValue?: { text?: string; now?: number; min?: number; max?: number };
   testID?: string;
 };
 
@@ -100,6 +102,7 @@ export function PressableMotion({
   accessibilityLabel,
   accessibilityState,
   accessibilityHasPopup,
+  accessibilityValue,
   testID,
 }: PressableMotionProps) {
   const { movimientoReducido } = useMotionPreferences();
@@ -128,6 +131,7 @@ export function PressableMotion({
     accessibilityRole,
     accessibilityLabel,
     accessibilityState,
+    accessibilityValue,
     "aria-haspopup": accessibilityHasPopup,
     testID,
   } as const;

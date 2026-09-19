@@ -14,9 +14,9 @@ import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
 
-const ROLES = ["ADMIN", "OWNER", "RECEPTION", "FACIALIST"] as const;
-const ROLE_LABELS: Record<string, string> = { ADMIN: "Admin", OWNER: "Owner/Laserista", RECEPTION: "Recepcionista", FACIALIST: "Facialista" };
-const ROLE_COLORS: Record<string, string> = { ADMIN: Colors.error, OWNER: Colors.primary, RECEPTION: Colors.secondary, FACIALIST: Colors.accent };
+const ROLES = ["OWNER", "RECEPTION", "FACIALIST"] as const;
+const ROLE_LABELS: Record<string, string> = { OWNER: "Dueña/Laserista", RECEPTION: "Recepcionista", FACIALIST: "Facialista" };
+const ROLE_COLORS: Record<string, string> = { OWNER: Colors.primary, RECEPTION: Colors.secondary, FACIALIST: Colors.accent };
 
 export default function UsersScreen() {
   const qc = useQueryClient();

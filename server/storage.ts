@@ -2,7 +2,8 @@ import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import { ensureDbReady, loadEntity, saveEntity } from "./db";
 
-export type Role = "ADMIN" | "OWNER" | "RECEPTION" | "FACIALIST";
+/** Tres roles para tres personas. `ADMIN` se fundió en `OWNER`: ver ADR-0005. */
+export type Role = "OWNER" | "RECEPTION" | "FACIALIST";
 export type AppointmentType = "FACIAL" | "LASER";
 export type AppointmentStatus = "SCHEDULED" | "ARRIVED" | "NO_SHOW" | "DONE" | "CANCELLED";
 export type PaymentMethod = "CASH" | "CARD" | "INCLUDED";
@@ -126,7 +127,8 @@ export interface Payment {
 
 export interface AvailabilityBlock {
   id: string;
-  userId: string;
+  /** `null` = bloqueo de centro: afecta a todas las agendas, no a una persona. */
+  userId: string | null;
   startDateTime: string;
   endDateTime: string;
   reason?: string;
@@ -267,17 +269,40 @@ class DbStorage {
     this.tokens.replaceAll(tokenRecord);
   }
 
+  /**
+   * `ADMIN` dejó de existir (ADR-0005): quien lo tuviera pasa a `OWNER`.
+   *
+   * Idempotente y anterior al seed, para que una base que ya traía una cuenta de admin
+   * no acabe además con una cuenta de dueña recién sembrada.
+   */
+  private migrarAdminAOwner() {
+    let migrados = 0;
+    this.users.forEach((user) => {
+      if ((user.role as string) === "ADMIN") {
+        user.role = "OWNER";
+        this.users.set(user.id, user);
+        migrados += 1;
+      }
+    });
+    this.tokens.forEach((session, token) => {
+      if ((session.role as string) === "ADMIN") this.tokens.set(token, { ...session, role: "OWNER" });
+    });
+    if (migrados) console.log(`Migrados ${migrados} usuarios de ADMIN a OWNER (ADR-0005)`);
+  }
+
   private async seedIfNeeded() {
+    this.migrarAdminAOwner();
+
     if (!this.users.size) {
       const defaultAdminEmail = process.env.ADMIN_EMAIL || "admin@mevakbeautycenter.com";
       const defaultAdminPassword = process.env.ADMIN_PASSWORD || "admin123";
       const adminHash = await bcrypt.hash(defaultAdminPassword, 10);
       const admin: User = {
         id: randomUUID(),
-        name: "Admin",
+        name: "Dueña",
         email: defaultAdminEmail,
         passwordHash: adminHash,
-        role: "ADMIN",
+        role: "OWNER",
         isActive: true,
         createdAt: new Date().toISOString(),
       };

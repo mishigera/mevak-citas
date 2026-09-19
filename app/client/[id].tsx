@@ -83,10 +83,14 @@ export default function ClientDetailScreen() {
   const { canViewClinical, user } = useAuth();
   const role = user?.role;
 
+  /**
+   * Las tres ven el historial facial: la dueña no lo tenía y es la dueña del negocio,
+   * y la recepcionista agenda faciales sin poder mirar los anteriores.
+   * Lo clínico sigue siendo solo de la dueña.
+   */
   const availableTabs = useMemo(() => {
     if (role === "FACIALIST") return ["Resumen", "Faciales"] as const;
-    if (role === "OWNER") return ["Resumen", "Láser", "Clínica"] as const;
-    if (role === "RECEPTION") return ["Resumen", "Láser"] as const;
+    if (role === "RECEPTION") return ["Resumen", "Faciales", "Láser"] as const;
     return ["Resumen", "Faciales", "Láser", "Clínica"] as const;
   }, [role]);
 
@@ -133,7 +137,7 @@ export default function ClientDetailScreen() {
 
   const { data: packageCatalog = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/packages"],
-    enabled: role === "ADMIN" || role === "OWNER" || role === "RECEPTION",
+    enabled: role === "OWNER" || role === "RECEPTION",
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/packages", base);
@@ -145,7 +149,7 @@ export default function ClientDetailScreen() {
 
   const { data: laserAreas = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/laser-areas"],
-    enabled: role === "ADMIN" || role === "OWNER",
+    enabled: role === "OWNER",
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL("/api/laser-areas", base);
@@ -157,7 +161,7 @@ export default function ClientDetailScreen() {
 
   const { data: clientLaserSelections = SIN_ELEMENTOS } = useQuery<any[]>({
     queryKey: ["/api/clients", id, "laser-areas"],
-    enabled: role === "ADMIN" || role === "OWNER",
+    enabled: role === "OWNER",
     queryFn: async () => {
       const base = getApiUrl();
       const url = new URL(`/api/clients/${id}/laser-areas`, base);
@@ -239,7 +243,7 @@ export default function ClientDetailScreen() {
   });
 
   const toggleLaserArea = (svgKey: string) => {
-    if (!(role === "ADMIN" || role === "OWNER")) return;
+    if (role !== "OWNER") return;
     const next = selectedLaserSvgKeys.includes(svgKey)
       ? selectedLaserSvgKeys.filter((key) => key !== svgKey)
       : [...selectedLaserSvgKeys, svgKey];
@@ -349,7 +353,7 @@ export default function ClientDetailScreen() {
   function renderLaser() {
     return (
       <Stagger style={styles.tabContent}>
-        {(role === "ADMIN" || role === "OWNER") && (
+        {role === "OWNER" && (
           <View style={styles.card}>
             <LaserBodyMap
               areas={laserAreas}
@@ -361,7 +365,7 @@ export default function ClientDetailScreen() {
           </View>
         )}
 
-        {(role === "ADMIN" || role === "OWNER" || role === "RECEPTION") && (
+        {(role === "OWNER" || role === "RECEPTION") && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Vincular paquete comprado</Text>
             {packageCatalog.length === 0 ? (

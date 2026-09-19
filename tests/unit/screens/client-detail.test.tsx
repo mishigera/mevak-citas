@@ -51,7 +51,7 @@ beforeEach(() => {
 afterEach(() => alertSpy.mockRestore());
 
 async function abrir(
-  role: Role = "ADMIN",
+  role: Role = "OWNER",
   datos: Record<string, unknown> = {},
   nombreEsperado = "María López",
 ) {
@@ -74,7 +74,7 @@ describe("ficha del cliente", () => {
   });
 
   it("omite las filas de datos que faltan", async () => {
-    await abrir("ADMIN", {
+    await abrir("OWNER", {
       "/api/clients/c1": fixtures.cliente({ id: "c1", fullName: "Pelada", phone: "555", email: undefined, sex: undefined, occupation: undefined, birthDate: undefined }),
     }, "Pelada");
 
@@ -84,7 +84,7 @@ describe("ficha del cliente", () => {
   });
 
   it("traduce el sexo M a Masculino", async () => {
-    await abrir("ADMIN", { "/api/clients/c1": fixtures.cliente({ id: "c1", fullName: "María López", sex: "M" }) });
+    await abrir("OWNER", { "/api/clients/c1": fixtures.cliente({ id: "c1", fullName: "María López", sex: "M" }) });
 
 
     expect(screen.getByText("Masculino")).toBeTruthy();
@@ -97,7 +97,7 @@ describe("ficha del cliente", () => {
   });
 
   it("lista las últimas citas y deja abrirlas", async () => {
-    await abrir("ADMIN", {
+    await abrir("OWNER", {
       "/api/clients/c1/appointments": [fixtures.cita({ id: "a1", type: "LASER" })],
     });
 
@@ -113,7 +113,7 @@ describe("ficha del cliente", () => {
     const citas = Array.from({ length: 8 }, (_, i) =>
       fixtures.cita({ id: `a${i}`, dateTimeStart: `2026-0${(i % 9) + 1}-01T10:00:00.000Z` }),
     );
-    await abrir("ADMIN", { "/api/clients/c1/appointments": citas });
+    await abrir("OWNER", { "/api/clients/c1/appointments": citas });
 
     expect(screen.getAllByText(/·\s*Facial$/).length).toBeLessThanOrEqual(5);
   });
@@ -132,25 +132,25 @@ describe("ficha del cliente", () => {
 
 describe("pestañas visibles según el rol", () => {
   it.each([
-    ["ADMIN", ["Resumen", "Faciales", "Láser", "Clínica"]],
-    ["OWNER", ["Resumen", "Láser", "Clínica"]],
+    ["OWNER", ["Resumen", "Faciales", "Láser", "Clínica"]],
+    ["RECEPTION", ["Resumen", "Faciales", "Láser"]],
+    ["FACIALIST", ["Resumen", "Faciales"]],
   ] as const)("%s ve %s", async (role, esperadas) => {
     await abrir(role);
 
     esperadas.forEach((t) => expect(screen.getAllByText(t).length).toBeGreaterThan(0));
   });
 
-  it("OWNER no ve la pestaña de Faciales", async () => {
+  /** La dueña no tenía historial facial de sus propias clientas. */
+  it("OWNER sí ve la pestaña de Faciales", async () => {
     await abrir("OWNER");
 
-    expect(screen.queryByText("Faciales")).toBeNull();
+    expect(screen.getAllByText("Faciales").length).toBeGreaterThan(0);
   });
 
-  it("RECEPTION ve Resumen y Láser", async () => {
+  it("RECEPTION no ve lo clínico", async () => {
     await abrir("RECEPTION");
 
-    expect(screen.getByText("Resumen")).toBeTruthy();
-    expect(screen.getByText("Láser")).toBeTruthy();
     expect(screen.queryByText("Clínica")).toBeNull();
   });
 
@@ -271,7 +271,7 @@ describe("pestaña Láser", () => {
 
     fireEvent.press(screen.getByText("Láser"));
 
-    // [id].tsx:342 — el mapa está detrás de `role === "ADMIN" || role === "OWNER"`.
+    // [id].tsx — el mapa está detrás de `role === "OWNER"`.
     expect(screen.queryByText("Áreas láser de la clienta")).toBeNull();
     expect(apiCalls().filter((c) => c.method === "PUT")).toHaveLength(0);
   });
@@ -279,7 +279,7 @@ describe("pestaña Láser", () => {
 
 describe("pestaña Faciales", () => {
   it("separa las citas faciales de las de láser", async () => {
-    await abrir("ADMIN", {
+    await abrir("OWNER", {
       "/api/clients/c1/appointments": [
         fixtures.cita({ id: "f1", type: "FACIAL", dateTimeStart: "2026-03-01T10:00:00.000Z" }),
         fixtures.cita({ id: "l1", type: "LASER", dateTimeStart: "2026-04-01T10:00:00.000Z" }),
@@ -294,7 +294,7 @@ describe("pestaña Faciales", () => {
 
 describe("estados de carga y error", () => {
   it("muestra el cargador mientras llega el cliente", () => {
-    __setAuthUser({ id: "u1", name: "Jefa", email: "a@m.test", role: "ADMIN" });
+    __setAuthUser({ id: "u1", name: "Jefa", email: "a@m.test", role: "OWNER" });
     mockApi(datosBase);
 
     renderScreen(<ClientDetailScreen />);
@@ -303,7 +303,7 @@ describe("estados de carga y error", () => {
   });
 
   it("aguanta que el servidor falle en las consultas secundarias", async () => {
-    await abrir("ADMIN", {
+    await abrir("OWNER", {
       "/api/clients/c1/packages": { __status: 500, message: "Boom" },
       "/api/clients/c1/appointments": { __status: 500, message: "Boom" },
     });

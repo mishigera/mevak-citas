@@ -83,11 +83,10 @@ function Cuerpo({ children }: { children: React.ReactNode }) {
 }
 
 export default function MoreScreen() {
-  const { user, logout, canCreateBlocks, canManageServices, canViewReports, isOwnerOrAdmin } = useAuth();
+  const { user, logout, canCreateBlocks, canManageServices, canViewReports, isOwner } = useAuth();
 
   const roleLabels: Record<string, string> = {
-    ADMIN: "Administrador",
-    OWNER: "Propietaria / Laserista",
+    OWNER: "Dueña / Laserista",
     RECEPTION: "Recepcionista",
     FACIALIST: "Facialista",
   };
@@ -128,15 +127,15 @@ export default function MoreScreen() {
           <Section title="Disponibilidad">
             <MenuItem
               icon="ban-outline"
-              label="Mis bloqueos"
-              sublabel="Gestionar días/horas no disponibles"
+              label="Bloqueos"
+              sublabel="Días y horas en que no se agenda"
               color={Colors.warning}
               onPress={() => router.push("/blocks")}
             />
           </Section>
         )}
 
-        {isOwnerOrAdmin && (
+        {isOwner && (
           <Section title="Pagos">
             <MenuItem
               icon="cash-outline"

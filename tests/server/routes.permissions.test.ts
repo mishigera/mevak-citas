@@ -16,7 +16,7 @@ import { buildApp, authAs, aClient, anAppointment, aBlock } from "../setup/serve
  * que aquí se quiere.
  */
 
-const ROLES = ["ADMIN", "OWNER", "RECEPTION", "FACIALIST"] as const;
+const ROLES = ["OWNER", "RECEPTION", "FACIALIST"] as const;
 type Rol = (typeof ROLES)[number];
 
 interface Caso {
@@ -28,47 +28,47 @@ interface Caso {
 }
 
 const CASOS: Caso[] = [
-  // Gestión de usuarios: solo ADMIN
-  { desc: "crear usuario", method: "post", path: "/api/users", permitidos: ["ADMIN"],
+  // Gestión de usuarios: solo la dueña (ADR-0005 fundió ADMIN en OWNER)
+  { desc: "crear usuario", method: "post", path: "/api/users", permitidos: ["OWNER"],
     body: { name: "X", email: "x@y.z", password: "p", role: "RECEPTION" } },
-  { desc: "editar usuario", method: "patch", path: "/api/users/u1", permitidos: ["ADMIN"],
+  { desc: "editar usuario", method: "patch", path: "/api/users/u1", permitidos: ["OWNER"],
     body: { name: "Y" } },
 
-  // Historia clínica: solo ADMIN y OWNER. RECEPTION no debe verla.
+  // Historia clínica: solo la dueña. RECEPTION no debe verla.
   { desc: "ver historia clínica", method: "get", path: "/api/clients/client-1/clinical",
-    permitidos: ["ADMIN", "OWNER"] },
+    permitidos: ["OWNER"] },
   { desc: "editar historia clínica", method: "put", path: "/api/clients/client-1/clinical",
-    permitidos: ["ADMIN", "OWNER"], body: { allergiesFlag: false, conditionsJson: {} } },
+    permitidos: ["OWNER"], body: { allergiesFlag: false, conditionsJson: {} } },
   { desc: "editar áreas de láser del cliente", method: "put",
-    path: "/api/clients/client-1/laser-areas", permitidos: ["ADMIN", "OWNER"], body: { areaIds: [] } },
+    path: "/api/clients/client-1/laser-areas", permitidos: ["OWNER"], body: { areaIds: [] } },
 
-  // Catálogos: solo ADMIN
-  { desc: "crear servicio", method: "post", path: "/api/services", permitidos: ["ADMIN"],
+  // Catálogos: solo la dueña
+  { desc: "crear servicio", method: "post", path: "/api/services", permitidos: ["OWNER"],
     body: { name: "S", type: "FACIAL", price: 100 } },
-  { desc: "editar servicio", method: "patch", path: "/api/services/s1", permitidos: ["ADMIN"],
+  { desc: "editar servicio", method: "patch", path: "/api/services/s1", permitidos: ["OWNER"],
     body: { price: 200 } },
-  { desc: "crear paquete", method: "post", path: "/api/packages", permitidos: ["ADMIN"],
+  { desc: "crear paquete", method: "post", path: "/api/packages", permitidos: ["OWNER"],
     body: { name: "P", totalSessions: 6, price: 600 } },
 
-  // Venta de paquetes: ADMIN, OWNER y RECEPTION
+  // Venta de paquetes: la dueña y recepción
   { desc: "vender paquete a cliente", method: "post", path: "/api/clients/client-1/packages",
-    permitidos: ["ADMIN", "OWNER", "RECEPTION"], body: { packageId: "package-1" } },
+    permitidos: ["OWNER", "RECEPTION"], body: { packageId: "package-1" } },
 
-  // Sesión de láser: ADMIN y OWNER
+  // Sesión de láser: solo la dueña
   { desc: "editar sesión de láser", method: "put", path: "/api/appointments/appt-1/laser-session",
-    permitidos: ["ADMIN", "OWNER"], body: { notes: "n" } },
+    permitidos: ["OWNER"], body: { notes: "n" } },
 
-  // Dinero: ADMIN y OWNER
+  // Dinero: solo la dueña
   { desc: "liquidar a la facialista", method: "patch", path: "/api/payments/p1/facialist-paid",
-    permitidos: ["ADMIN", "OWNER"], body: {} },
+    permitidos: ["OWNER"], body: {} },
   { desc: "ver pagos pendientes", method: "get", path: "/api/payments/pending-facialist",
-    permitidos: ["ADMIN", "OWNER"] },
+    permitidos: ["OWNER"] },
   { desc: "ver reporte de ingresos", method: "get", path: "/api/reports/income",
-    permitidos: ["ADMIN", "OWNER"] },
+    permitidos: ["OWNER"] },
 
-  // Bloqueos: todos menos RECEPTION
+  // Bloqueos: las tres. Recepción es quien agenda, tiene que poder cerrar el centro.
   { desc: "crear bloqueo", method: "post", path: "/api/blocks",
-    permitidos: ["ADMIN", "OWNER", "FACIALIST"],
+    permitidos: ["OWNER", "RECEPTION", "FACIALIST"],
     body: { startDateTime: "2026-10-01T09:00:00.000Z", endDateTime: "2026-10-01T10:00:00.000Z" } },
 ];
 
@@ -131,11 +131,14 @@ describe("borrar bloqueo: puerta de rol + regla de propiedad", () => {
    * Este endpoint devuelve 403 por DOS motivos distintos (routes.ts:502-507):
    * el rol, y ser dueño del bloqueo. Por eso no entra en la matriz genérica.
    */
-  it("RECEPTION no pasa ni la puerta del rol", async () => {
-    const { app, tokens } = await appConRoles();
-    const res = await request(app).delete("/api/blocks/block-1")
+  it("RECEPTION borra el bloqueo de cualquiera: gestiona la agenda", async () => {
+    const { app, storage, tokens } = await appConRoles();
+    storage.availabilityBlocks.set("ajeno", aBlock({ id: "ajeno", userId: "u-FACIALIST" }) as never);
+
+    const res = await request(app).delete("/api/blocks/ajeno")
       .set("Authorization", `Bearer ${tokens.RECEPTION}`);
-    expect(res.status).toBe(403);
+
+    expect(res.status).toBe(200);
   });
 
   it("FACIALIST borra su propio bloqueo", async () => {
@@ -161,22 +164,12 @@ describe("borrar bloqueo: puerta de rol + regla de propiedad", () => {
     expect(storage.availabilityBlocks.get("ajeno")).toBeDefined();
   });
 
-  it("OWNER tampoco borra el bloqueo de otro", async () => {
+  it("OWNER sí borra el bloqueo de otro: gestiona la agenda", async () => {
     const { app, storage, tokens } = await appConRoles();
     storage.availabilityBlocks.set("ajeno", aBlock({ id: "ajeno", userId: "u-FACIALIST" }) as never);
 
     const res = await request(app).delete("/api/blocks/ajeno")
       .set("Authorization", `Bearer ${tokens.OWNER}`);
-
-    expect(res.status).toBe(403);
-  });
-
-  it("ADMIN sí puede borrar el bloqueo de cualquiera", async () => {
-    const { app, storage, tokens } = await appConRoles();
-    storage.availabilityBlocks.set("ajeno", aBlock({ id: "ajeno", userId: "u-FACIALIST" }) as never);
-
-    const res = await request(app).delete("/api/blocks/ajeno")
-      .set("Authorization", `Bearer ${tokens.ADMIN}`);
 
     expect(res.status).toBe(200);
   });
@@ -184,7 +177,7 @@ describe("borrar bloqueo: puerta de rol + regla de propiedad", () => {
   it("404 si el bloqueo no existe", async () => {
     const { app, tokens } = await appConRoles();
     const res = await request(app).delete("/api/blocks/no-existe")
-      .set("Authorization", `Bearer ${tokens.ADMIN}`);
+      .set("Authorization", `Bearer ${tokens.OWNER}`);
     expect(res.status).toBe(404);
   });
 
@@ -195,10 +188,10 @@ describe("borrar bloqueo: puerta de rol + regla de propiedad", () => {
 });
 
 describe("invariantes de permisos", () => {
-  it("ADMIN pasa la puerta de todos los endpoints protegidos", async () => {
+  it("OWNER pasa la puerta de todos los endpoints protegidos", async () => {
     const { app, tokens } = await appConRoles();
     for (const caso of CASOS) {
-      const res = await llamar(app, caso, tokens.ADMIN);
+      const res = await llamar(app, caso, tokens.OWNER);
       expect({ endpoint: caso.desc, status: res.status })
         .not.toMatchObject({ status: 403 });
     }
@@ -226,9 +219,9 @@ describe("invariantes de permisos", () => {
 
   it("un token con rol manipulado no escala privilegios", async () => {
     const { app, storage } = await appConRoles();
-    // Token que dice ADMIN pero apunta a un usuario RECEPTION real.
+    // Token que dice OWNER pero apunta a un usuario RECEPTION real.
     const falso = "token-falsificado";
-    storage.tokens.set(falso, { userId: "u-RECEPTION", role: "ADMIN" as never });
+    storage.tokens.set(falso, { userId: "u-RECEPTION", role: "OWNER" as never });
 
     const res = await request(app).post("/api/services")
       .set("Authorization", `Bearer ${falso}`)

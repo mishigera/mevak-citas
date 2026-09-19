@@ -51,7 +51,7 @@ describe("layout de pestañas", () => {
 
   it("usa las pestañas nativas cuando el sistema las soporta", () => {
     glass.mockReturnValue(true);
-    __setAuthUser({ id: "u1", name: "Dueña", email: "a@m.test", role: "ADMIN" });
+    __setAuthUser({ id: "u1", name: "Dueña", email: "a@m.test", role: "OWNER" });
 
     renderScreen(<TabLayout />);
 
@@ -64,7 +64,7 @@ describe("layout de pestañas", () => {
 
   it("las pestañas nativas llevan sus etiquetas en español", () => {
     glass.mockReturnValue(true);
-    __setAuthUser({ id: "u1", name: "Dueña", email: "a@m.test", role: "ADMIN" });
+    __setAuthUser({ id: "u1", name: "Dueña", email: "a@m.test", role: "OWNER" });
 
     renderScreen(<TabLayout />);
 
@@ -73,7 +73,7 @@ describe("layout de pestañas", () => {
     );
   });
 
-  it.each(["ADMIN", "OWNER", "RECEPTION", "FACIALIST"] as const)(
+  it.each(["OWNER", "RECEPTION", "FACIALIST"] as const)(
     "%s ve las mismas cuatro pestañas", (role) => {
       __setAuthUser({ id: "u1", name: "X", email: "a@m.test", role });
 

@@ -9,7 +9,7 @@
  */
 import React from "react";
 
-export type Role = "ADMIN" | "OWNER" | "RECEPTION" | "FACIALIST";
+export type Role = "OWNER" | "RECEPTION" | "FACIALIST";
 
 export interface AuthUser {
   id: string;
@@ -69,11 +69,12 @@ export function useAuth() {
     isLoading: e.isLoading,
     login: e.login,
     logout: e.logout,
-    canViewClinical: role === "ADMIN" || role === "OWNER",
-    canManageServices: role === "ADMIN",
-    canViewReports: role === "ADMIN" || role === "OWNER",
-    canCreateBlocks: role === "ADMIN" || role === "OWNER" || role === "FACIALIST",
-    isOwnerOrAdmin: role === "ADMIN" || role === "OWNER",
+    canViewClinical: role === "OWNER",
+    canManageServices: role === "OWNER",
+    canViewReports: role === "OWNER",
+    canCreateBlocks: true,
+    canManageAgenda: role === "OWNER" || role === "RECEPTION",
+    isOwner: role === "OWNER",
   };
 }
 

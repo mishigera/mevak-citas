@@ -64,6 +64,62 @@ function enrichClientPackage(clientPackage: ClientPackage | null | undefined) {
   };
 }
 
+/**
+ * La forma que la app manda y la base guarda: `YYYY-MM-DD`, con hora opcional y zona
+ * opcional. Comprobar la forma **antes** de parsear no es paranoia: el parser de V8 es
+ * generoso y `new Date("mañana a las 10")` devuelve una fecha real del año 2001.
+ */
+const FORMATO_FECHA = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
+/** Milisegundos de una fecha-hora bien formada, o `null`. */
+function instante(valor: unknown): number | null {
+  if (typeof valor !== "string" || !FORMATO_FECHA.test(valor.trim())) return null;
+  const t = new Date(valor).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+/**
+ * Valida un intervalo antes de guardarlo.
+ *
+ * Existía ya en `POST /api/blocks` y **faltaba en las citas**: una fecha mal tecleada
+ * daba `NaN`, y como toda comparación con `NaN` es `false`, la detección de solapes se
+ * desactivaba en silencio y la cita se guardaba con una fecha basura que no aparecía en
+ * ningún día. Deuda §30.
+ */
+function validarIntervalo(inicio: unknown, fin: unknown): { start: number; end: number } | string {
+  const start = instante(inicio);
+  const end = instante(fin);
+  if (start === null || end === null) return "Formato de fecha inválido";
+  if (end <= start) return "La fecha/hora de fin debe ser mayor a inicio";
+  return { start, end };
+}
+
+function seSolapan(aInicio: number, aFin: number, bInicio: unknown, bFin: unknown): boolean {
+  const start = instante(bInicio);
+  const end = instante(bFin);
+  if (start === null || end === null) return false;
+  return aInicio < end && aFin > start;
+}
+
+/** La cita choca con otra del mismo staff. `exceptoId` salta la cita que se está moviendo. */
+function citaEnConflicto(staffId: string, start: number, end: number, exceptoId?: string) {
+  return Array.from(storage.appointments.values()).find((a) => {
+    if (a.id === exceptoId || a.staffId !== staffId || a.status === "CANCELLED") return false;
+    return seSolapan(start, end, a.dateTimeStart, a.dateTimeEnd);
+  });
+}
+
+/**
+ * La cita cae en un bloqueo. Un bloqueo con `userId: null` es de centro y afecta a todas
+ * las agendas (ADR-0005 dejó tres roles; el centro no es ninguno de ellos).
+ */
+function bloqueoEnConflicto(staffId: string, start: number, end: number) {
+  return Array.from(storage.availabilityBlocks.values()).find((b) => {
+    if (b.userId !== null && b.userId !== staffId) return false;
+    return seSolapan(start, end, b.startDateTime, b.endDateTime);
+  });
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   await storage.ready;
 
@@ -107,7 +163,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(staff);
   });
 
-  app.post("/api/users", requireRole("ADMIN"), async (req, res) => {
+  app.post("/api/users", requireRole("OWNER"), async (req, res) => {
     const { name, email, password, role } = req.body;
     if (!name || !email || !password || !role) return res.status(400).json({ message: "Faltan campos" });
     const exists = Array.from(storage.users.values()).find((u) => u.email === email);
@@ -118,7 +174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role, isActive: user.isActive });
   });
 
-  app.patch("/api/users/:id", requireRole("ADMIN"), async (req, res) => {
+  app.patch("/api/users/:id", requireRole("OWNER"), async (req, res) => {
     const user = storage.users.get(paramId(req));
     if (!user) return res.status(404).json({ message: "Not found" });
     const { name, email, role, isActive, password } = req.body;
@@ -166,13 +222,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // CLINICAL PROFILE
-  app.get("/api/clients/:id/clinical", requireRole("ADMIN", "OWNER"), (req, res) => {
+  app.get("/api/clients/:id/clinical", requireRole("OWNER"), (req, res) => {
     const profiles = Array.from(storage.clinicalProfiles.values());
     const profile = profiles.find((p) => p.clientId === paramId(req));
     res.json(profile || null);
   });
 
-  app.put("/api/clients/:id/clinical", requireRole("ADMIN", "OWNER"), (req, res) => {
+  app.put("/api/clients/:id/clinical", requireRole("OWNER"), (req, res) => {
     const clientId = paramId(req);
     const profiles = Array.from(storage.clinicalProfiles.values());
     const profile = profiles.find((p) => p.clientId === clientId);
@@ -196,7 +252,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === paramId(req)));
   });
 
-  app.put("/api/clients/:id/laser-areas", requireRole("ADMIN", "OWNER"), (req, res) => {
+  app.put("/api/clients/:id/laser-areas", requireRole("OWNER"), (req, res) => {
     const clientId = paramId(req);
     const { areaIds } = req.body as { areaIds: string[] };
     Array.from(storage.clientLaserSelections.values()).filter((s) => s.clientId === clientId).forEach((s) => storage.clientLaserSelections.delete(s.id));
@@ -214,7 +270,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(packages);
   });
 
-  app.post("/api/clients/:id/packages", requireRole("ADMIN", "OWNER", "RECEPTION"), (req, res) => {
+  app.post("/api/clients/:id/packages", requireRole("OWNER", "RECEPTION"), (req, res) => {
     const clientId = paramId(req);
     const client = storage.clients.get(clientId);
     if (!client) return res.status(404).json({ message: "Cliente no encontrado" });
@@ -233,7 +289,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(services);
   });
 
-  app.post("/api/services", requireRole("ADMIN"), (req, res) => {
+  app.post("/api/services", requireRole("OWNER"), (req, res) => {
     const { name, type, price } = req.body;
     if (!name || !type || price === undefined) return res.status(400).json({ message: "Faltan campos" });
     const svc = { id: randomUUID(), name, type, price: Number(price), isActive: true };
@@ -241,7 +297,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(201).json(svc);
   });
 
-  app.patch("/api/services/:id", requireRole("ADMIN"), (req, res) => {
+  app.patch("/api/services/:id", requireRole("OWNER"), (req, res) => {
     const svc = storage.services.get(paramId(req));
     if (!svc) return res.status(404).json({ message: "Not found" });
     Object.assign(svc, req.body);
@@ -254,7 +310,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(Array.from(storage.packages.values()).filter((p) => p.isActive));
   });
 
-  app.post("/api/packages", requireRole("ADMIN"), (req, res) => {
+  app.post("/api/packages", requireRole("OWNER"), (req, res) => {
     const { name, totalSessions, price } = req.body;
     if (!name || !totalSessions || price === undefined) return res.status(400).json({ message: "Faltan campos" });
     const pkg = { id: randomUUID(), name, type: "LASER" as const, totalSessions: Number(totalSessions), price: Number(price), isActive: true };
@@ -296,20 +352,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/appointments", requireAuth, (req, res) => {
     const { dateTimeStart, dateTimeEnd, clientId, staffId, type, notes } = req.body;
     if (!dateTimeStart || !dateTimeEnd || !clientId || !staffId || !type) return res.status(400).json({ message: "Faltan campos" });
-    const conflict = Array.from(storage.appointments.values()).find((a) => {
-      if (a.staffId !== staffId || a.status === "CANCELLED") return false;
-      const start = new Date(dateTimeStart).getTime(); const end = new Date(dateTimeEnd).getTime();
-      const aStart = new Date(a.dateTimeStart).getTime(); const aEnd = new Date(a.dateTimeEnd).getTime();
-      return start < aEnd && end > aStart;
-    });
-    if (conflict) return res.status(409).json({ message: "Conflicto de horario con otra cita" });
-    const block = Array.from(storage.availabilityBlocks.values()).find((b) => {
-      if (b.userId !== staffId) return false;
-      const start = new Date(dateTimeStart).getTime(); const end = new Date(dateTimeEnd).getTime();
-      const bStart = new Date(b.startDateTime).getTime(); const bEnd = new Date(b.endDateTime).getTime();
-      return start < bEnd && end > bStart;
-    });
-    if (block) return res.status(409).json({ message: "El staff tiene un bloqueo en ese horario" });
+    const intervalo = validarIntervalo(dateTimeStart, dateTimeEnd);
+    if (typeof intervalo === "string") return res.status(400).json({ message: intervalo });
+    const { start, end } = intervalo;
+    if (citaEnConflicto(staffId, start, end)) return res.status(409).json({ message: "Conflicto de horario con otra cita" });
+    const block = bloqueoEnConflicto(staffId, start, end);
+    if (block) {
+      return res.status(409).json({
+        message: block.userId === null ? "El centro está cerrado en ese horario" : "El staff tiene un bloqueo en ese horario",
+      });
+    }
     const appt = { id: randomUUID(), dateTimeStart, dateTimeEnd, clientId, staffId, type, status: "SCHEDULED" as const, notes };
     storage.appointments.set(appt.id, appt);
     res.status(201).json(appt);
@@ -319,15 +371,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const appt = storage.appointments.get(paramId(req));
     if (!appt) return res.status(404).json({ message: "Not found" });
     const { dateTimeStart, dateTimeEnd, staffId, status, notes, clientId, type } = req.body;
-    if ((dateTimeStart || dateTimeEnd) && (staffId || appt.staffId)) {
-      const checkStaff = staffId || appt.staffId; const checkStart = dateTimeStart || appt.dateTimeStart; const checkEnd = dateTimeEnd || appt.dateTimeEnd;
-      const conflict = Array.from(storage.appointments.values()).find((a) => {
-        if (a.id === appt.id || a.staffId !== checkStaff || a.status === "CANCELLED") return false;
-        const start = new Date(checkStart).getTime(); const end = new Date(checkEnd).getTime();
-        const aStart = new Date(a.dateTimeStart).getTime(); const aEnd = new Date(a.dateTimeEnd).getTime();
-        return start < aEnd && end > aStart;
-      });
-      if (conflict) return res.status(409).json({ message: "Conflicto de horario con otra cita" });
+    // Reprogramar valida lo mismo que crear: antes el PATCH solo miraba las otras citas
+    // y mover una encima de un bloqueo pasaba sin error (deuda §8).
+    if (dateTimeStart || dateTimeEnd || staffId) {
+      const checkStaff = staffId || appt.staffId;
+      const intervalo = validarIntervalo(dateTimeStart || appt.dateTimeStart, dateTimeEnd || appt.dateTimeEnd);
+      if (typeof intervalo === "string") return res.status(400).json({ message: intervalo });
+      const { start, end } = intervalo;
+      if (citaEnConflicto(checkStaff, start, end, appt.id)) return res.status(409).json({ message: "Conflicto de horario con otra cita" });
+      const block = bloqueoEnConflicto(checkStaff, start, end);
+      if (block) {
+        return res.status(409).json({
+          message: block.userId === null ? "El centro está cerrado en ese horario" : "El staff tiene un bloqueo en ese horario",
+        });
+      }
     }
     if (dateTimeStart) appt.dateTimeStart = dateTimeStart;
     if (dateTimeEnd) appt.dateTimeEnd = dateTimeEnd;
@@ -355,7 +412,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(session || null);
   });
 
-  app.put("/api/appointments/:id/laser-session", requireRole("ADMIN", "OWNER"), (req, res) => {
+  app.put("/api/appointments/:id/laser-session", requireRole("OWNER"), (req, res) => {
     const appointmentId = paramId(req);
     const existing = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === appointmentId);
     if (existing) {
@@ -447,7 +504,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(201).json(payment);
   });
 
-  app.patch("/api/payments/:id/facialist-paid", requireRole("ADMIN", "OWNER"), (req, res) => {
+  app.patch("/api/payments/:id/facialist-paid", requireRole("OWNER"), (req, res) => {
     const payment = storage.payments.get(paramId(req));
     if (!payment) return res.status(404).json({ message: "Not found" });
     payment.facialistPaidFlag = req.body.paid ?? true;
@@ -455,7 +512,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(payment);
   });
 
-  app.get("/api/payments/pending-facialist", requireRole("ADMIN", "OWNER"), (req, res) => {
+  app.get("/api/payments/pending-facialist", requireRole("OWNER"), (req, res) => {
     const pending = Array.from(storage.payments.values())
       .filter((p) => !p.facialistPaidFlag && p.facialistNetAmount > 0)
       .map((p) => {
@@ -467,7 +524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(pending);
   });
 
-  app.get("/api/reports/income", requireRole("ADMIN", "OWNER"), (req, res) => {
+  app.get("/api/reports/income", requireRole("OWNER"), (req, res) => {
     const { month, year } = req.query;
     let payments = Array.from(storage.payments.values());
     if (month && year) { payments = payments.filter((p) => { const d = new Date(p.createdAt); return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year); }); }
@@ -478,32 +535,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // AVAILABILITY BLOCKS
+  /**
+   * Todos los bloqueos, de todo el mundo.
+   *
+   * Antes cada quien veía solo los suyos, así que **quien agenda no veía ninguno**: la
+   * recepcionista se enteraba de que la laserista no estaba por un 409 al guardar la
+   * cita. Deuda §29.
+   */
   app.get("/api/blocks", requireAuth, (req, res) => {
-    const userId = req.userId!;
-    const role = req.userRole!;
-    let blocks = Array.from(storage.availabilityBlocks.values());
-    if (role !== "ADMIN") blocks = blocks.filter((b) => b.userId === userId);
-    const enriched = blocks.map((b) => { const user = storage.users.get(b.userId); return { ...b, user: user ? { id: user.id, name: user.name } : null }; });
+    const enriched = Array.from(storage.availabilityBlocks.values()).map((b) => {
+      const user = b.userId ? storage.users.get(b.userId) : null;
+      return { ...b, user: user ? { id: user.id, name: user.name } : null };
+    });
+    enriched.sort((a, b) => a.startDateTime.localeCompare(b.startDateTime));
     res.json(enriched);
   });
 
-  app.post("/api/blocks", requireRole("ADMIN", "OWNER", "FACIALIST"), (req, res) => {
-    const { startDateTime, endDateTime, reason } = req.body;
+  /** Quién puede bloquear la agenda de otra persona, o la del centro entero. */
+  function gestionaAgenda(role: Role | undefined) {
+    return role === "OWNER" || role === "RECEPTION";
+  }
+
+  app.post("/api/blocks", requireRole("OWNER", "RECEPTION", "FACIALIST"), (req, res) => {
+    const { startDateTime, endDateTime, reason, scope, userId } = req.body as {
+      startDateTime?: string; endDateTime?: string; reason?: string;
+      scope?: "SELF" | "CENTER"; userId?: string;
+    };
     if (!startDateTime || !endDateTime) return res.status(400).json({ message: "Faltan fechas" });
-    const start = new Date(startDateTime).getTime();
-    const end = new Date(endDateTime).getTime();
-    if (Number.isNaN(start) || Number.isNaN(end)) return res.status(400).json({ message: "Formato de fecha inválido" });
-    if (end <= start) return res.status(400).json({ message: "La fecha/hora de fin debe ser mayor a inicio" });
-    const block = { id: randomUUID(), userId: req.userId!, startDateTime, endDateTime, reason };
+    const intervalo = validarIntervalo(startDateTime, endDateTime);
+    if (typeof intervalo === "string") return res.status(400).json({ message: intervalo });
+
+    // `null` = el centro cierra. Antes no existía: un bloqueo siempre se asignaba a quien
+    // lo creaba, así que para un festivo cada una tenía que crear el suyo.
+    let dueño: string | null;
+    if (scope === "CENTER") {
+      if (!gestionaAgenda(req.userRole)) return res.status(403).json({ message: "Solo la dueña o recepción cierran el centro" });
+      dueño = null;
+    } else if (userId && userId !== req.userId) {
+      if (!gestionaAgenda(req.userRole)) return res.status(403).json({ message: "No puedes bloquear la agenda de otra persona" });
+      const destino = storage.users.get(userId);
+      if (!destino || !destino.isActive) return res.status(404).json({ message: "Usuario no encontrado" });
+      dueño = destino.id;
+    } else {
+      dueño = req.userId!;
+    }
+
+    const block = { id: randomUUID(), userId: dueño, startDateTime, endDateTime, reason };
     storage.availabilityBlocks.set(block.id, block);
     res.status(201).json(block);
   });
 
-  app.delete("/api/blocks/:id", requireRole("ADMIN", "OWNER", "FACIALIST"), (req, res) => {
+  app.delete("/api/blocks/:id", requireRole("OWNER", "RECEPTION", "FACIALIST"), (req, res) => {
     const blockId = paramId(req);
     const block = storage.availabilityBlocks.get(blockId);
     if (!block) return res.status(404).json({ message: "Not found" });
-    if (block.userId !== req.userId && req.userRole !== "ADMIN") return res.status(403).json({ message: "No puedes eliminar bloqueos de otro usuario" });
+    if (block.userId !== req.userId && !gestionaAgenda(req.userRole)) {
+      return res.status(403).json({ message: "No puedes eliminar bloqueos de otro usuario" });
+    }
     storage.availabilityBlocks.delete(blockId);
     res.json({ ok: true });
   });

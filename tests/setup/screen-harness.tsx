@@ -6,7 +6,7 @@
  */
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { configure, render, screen, fireEvent, type RenderOptions } from "@testing-library/react-native";
+import { configure, render, screen, fireEvent, waitFor, type RenderOptions } from "@testing-library/react-native";
 import { fetch as expoFetch } from "expo/fetch";
 import { useLocalSearchParams, router } from "expo-router";
 
@@ -200,4 +200,41 @@ export function pressIcon(name: string, indice = 0) {
     );
   }
   fireEvent.press(icono);
+}
+
+/**
+ * Elige una fecha en un `CampoFecha`.
+ *
+ * Antes la fecha era un `<TextInput>` y bastaba con `changeText`. Ahora se navega por
+ * meses hasta el que toca y se pulsa el día, que es justo lo que hace una persona; y
+ * así el test tampoco depende de en qué mes esté hoy.
+ */
+export async function elegirFecha(etiqueta: string, clave: string) {
+  const [año, mes, dia] = clave.split("-");
+  fireEvent.press(screen.getByLabelText(etiqueta));
+  await waitFor(() => expect(screen.getByLabelText("Mes siguiente")).toBeTruthy());
+
+  const objetivo = `Mes visible: ${año}-${mes}`;
+  for (let i = 0; i < 48 && !screen.queryByLabelText(objetivo); i++) {
+    const [actualAño, actualMes] = screen
+      .getByLabelText(/^Mes visible: /)
+      .props.accessibilityLabel.replace("Mes visible: ", "")
+      .split("-");
+    const adelante =
+      Number(año) > Number(actualAño) ||
+      (año === actualAño && Number(mes) > Number(actualMes));
+    fireEvent.press(screen.getByLabelText(adelante ? "Mes siguiente" : "Mes anterior"));
+  }
+
+  if (!screen.queryByLabelText(objetivo)) {
+    throw new Error(`No se pudo llegar al mes ${año}-${mes} en el selector "${etiqueta}"`);
+  }
+  fireEvent.press(screen.getByLabelText(String(Number(dia))));
+}
+
+/** Elige una hora en un `CampoHora`. Las opciones van de 15 en 15 minutos. */
+export async function elegirHora(etiqueta: string, hora: string) {
+  fireEvent.press(screen.getByLabelText(etiqueta));
+  await waitFor(() => expect(screen.getByLabelText(hora)).toBeTruthy());
+  fireEvent.press(screen.getByLabelText(hora));
 }

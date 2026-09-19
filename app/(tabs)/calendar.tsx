@@ -19,11 +19,8 @@ import { Stagger } from "@/components/motion";
 import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import * as Haptics from "expo-haptics";
 import { getApiUrl, getAuthToken } from "@/lib/query-client";
+import { ahoraClave, claveDiaISO, desdeClave, sumarDias } from "@/lib/fecha";
 import { fetch } from "expo/fetch";
-
-function dateKey(d: Date) {
-  return d.toISOString().split("T")[0];
-}
 
 function formatTime(iso: string) {
   const d = new Date(iso);
@@ -246,7 +243,7 @@ function DayView({
 
 export default function CalendarScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>("day");
-  const [selectedDate, setSelectedDate] = useState(dateKey(new Date()));
+  const [selectedDate, setSelectedDate] = useState(ahoraClave());
   const [monthOffset, setMonthOffset] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -296,8 +293,8 @@ export default function CalendarScreen() {
 
   const appointmentDates = useMemo(() => {
     const set = new Set<string>();
-    (allMonthAppts || []).forEach((a: any) => set.add(a.dateTimeStart.split("T")[0]));
-    (appointments || []).forEach((a: any) => set.add(a.dateTimeStart.split("T")[0]));
+    (allMonthAppts || []).forEach((a: any) => set.add(claveDiaISO(a.dateTimeStart)));
+    (appointments || []).forEach((a: any) => set.add(claveDiaISO(a.dateTimeStart)));
     return set;
   }, [allMonthAppts, appointments]);
 
@@ -310,8 +307,8 @@ export default function CalendarScreen() {
   const appts = appointments || [];
 
   const selectedDisplayDate = useMemo(() => {
-    const d = new Date(selectedDate + "T12:00:00");
-    const isToday = selectedDate === dateKey(new Date());
+    const d = desdeClave(selectedDate);
+    const isToday = selectedDate === ahoraClave();
     const label = d.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
     return isToday ? `Hoy — ${label}` : label;
   }, [selectedDate]);
@@ -340,13 +337,9 @@ export default function CalendarScreen() {
     return days;
   }, [monthYear]);
 
-  const todayKey = dateKey(new Date());
+  const todayKey = ahoraClave();
 
-  const moverDia = (días: number) => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + días);
-    setSelectedDate(dateKey(d));
-  };
+  const moverDia = (días: number) => setSelectedDate(sumarDias(selectedDate, días));
 
   return (
     <Screen

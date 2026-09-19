@@ -79,7 +79,7 @@ function authHeaders() {
 export default function AppointmentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
-  const { user, isOwnerOrAdmin } = useAuth();
+  const { user, isOwner } = useAuth();
 
   const [notes, setNotes] = useState("");
   const [editingNotes, setEditingNotes] = useState(false);
@@ -339,7 +339,7 @@ export default function AppointmentDetailScreen() {
                 <Ionicons name="time-outline" size={20} color={Colors.primary} />
                 <Text style={styles.quickBtnText}>Historial rápido</Text>
               </PressableMotion>
-              {appt.type === "LASER" && (user?.role === "OWNER" || user?.role === "ADMIN") && (
+              {appt.type === "LASER" && user?.role === "OWNER" && (
                 <PressableMotion gesto="sutil" style={styles.quickBtn} onPress={() => setShowLaserPowerModal(true)}>
                   <Ionicons name="flash-outline" size={20} color={Colors.secondary} />
                   <Text style={styles.quickBtnText}>Potencia por área</Text>
@@ -567,7 +567,7 @@ export default function AppointmentDetailScreen() {
                 <>
                   <InfoRow label="Owner" value={`$${appt.payment.ownerNetAmount}`} />
                   <InfoRow label="Facialista" value={`$${appt.payment.facialistNetAmount}`} />
-                  {isOwnerOrAdmin && (
+                  {isOwner && (
                     <View style={styles.paidToggle}>
                       <Text style={[styles.paidToggleLabel, appt.payment.facialistPaidFlag && { color: Colors.success }]}>
                         {appt.payment.facialistPaidFlag ? "✓ Pagado a facialista" : "⏳ Pendiente pago facialista"}
@@ -678,7 +678,7 @@ export default function AppointmentDetailScreen() {
         <ScrollView style={styles.panelLista} showsVerticalScrollIndicator={false}>
           <Stagger style={styles.panelContenido}>
             {(historyAppts || []).slice(0, 8).map((h) => {
-              const isLaserView = user?.role === "OWNER" || user?.role === "ADMIN";
+              const isLaserView = user?.role === "OWNER";
               return (
                 <View key={h.id} style={styles.historyItem}>
                   <Text style={styles.historyDate}>{new Date(h.dateTimeStart).toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" })} · {formatTime(h.dateTimeStart)}</Text>

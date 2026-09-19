@@ -6,12 +6,38 @@ import { freshStorage, __dbMock, aClient } from "../setup/server-harness";
 const flush = () => new Promise((r) => setTimeout(r, 40));
 
 describe("storage — seed inicial", () => {
-  it("crea un único usuario ADMIN cuando la base está vacía", async () => {
+  it("crea una única cuenta de dueña cuando la base está vacía", async () => {
     const storage = await freshStorage();
     const users = storage.users.snapshotValues();
 
     expect(users).toHaveLength(1);
-    expect(users[0]).toMatchObject({ role: "ADMIN", isActive: true, name: "Admin" });
+    expect(users[0]).toMatchObject({ role: "OWNER", isActive: true, name: "Dueña" });
+  });
+
+  /** ADR-0005: `ADMIN` dejó de existir y quien lo tuviera pasa a `OWNER`. */
+  it("migra a OWNER un usuario que venía con rol ADMIN", async () => {
+    const storage = await freshStorage({
+      users: [{
+        id: "u-viejo", name: "Admin de antes", email: "viejo@m.test", passwordHash: "h",
+        role: "ADMIN", isActive: true, createdAt: "2026-01-01T00:00:00.000Z",
+      }],
+    });
+
+    expect(storage.users.get("u-viejo")).toMatchObject({ role: "OWNER" });
+    // Y no siembra una cuenta nueva encima de la migrada.
+    expect(storage.users.snapshotValues()).toHaveLength(1);
+  });
+
+  it("migra también el rol guardado en un token vivo", async () => {
+    const storage = await freshStorage({
+      users: [{
+        id: "u-viejo", name: "Admin de antes", email: "viejo@m.test", passwordHash: "h",
+        role: "ADMIN", isActive: true, createdAt: "2026-01-01T00:00:00.000Z",
+      }],
+      tokens: [{ id: "tok", key: "tok", value: { userId: "u-viejo", role: "OWNER" } }],
+    });
+
+    expect(storage.tokens.get("tok")).toEqual({ userId: "u-viejo", role: "OWNER" });
   });
 
   it("usa ADMIN_EMAIL del entorno cuando está definida", async () => {
@@ -141,17 +167,17 @@ describe("storage — persistencia", () => {
 describe("storage — tokens", () => {
   it("persiste el token al crearlo", async () => {
     const storage = await freshStorage();
-    storage.tokens.set("tok-1", { userId: "u1", role: "ADMIN" });
+    storage.tokens.set("tok-1", { userId: "u1", role: "OWNER" });
     await flush();
 
     expect(__dbMock.persisted("tokens")).toEqual([
-      expect.objectContaining({ key: "tok-1", value: { userId: "u1", role: "ADMIN" } }),
+      expect.objectContaining({ key: "tok-1", value: { userId: "u1", role: "OWNER" } }),
     ]);
   });
 
   it("lo borra al hacer logout", async () => {
     const storage = await freshStorage();
-    storage.tokens.set("tok-1", { userId: "u1", role: "ADMIN" });
+    storage.tokens.set("tok-1", { userId: "u1", role: "OWNER" });
     await flush();
     storage.tokens.delete("tok-1");
     await flush();
@@ -170,7 +196,7 @@ describe("storage — tokens", () => {
   it("ignora filas de token corruptas sin reventar el arranque", async () => {
     const storage = await freshStorage({
       tokens: [
-        { id: "ok", key: "ok", value: { userId: "u1", role: "ADMIN" } },
+        { id: "ok", key: "ok", value: { userId: "u1", role: "OWNER" } },
         { id: "roto", key: null, value: null },
         null,
       ],

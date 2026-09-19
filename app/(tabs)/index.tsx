@@ -20,11 +20,8 @@ import { Entrar, Stagger } from "@/components/motion";
 import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import * as Haptics from "expo-haptics";
 import { getApiUrl } from "@/lib/query-client";
+import { ahoraClave, claveDiaISO, claveDiaLocal, desdeClave, sumarDias } from "@/lib/fecha";
 import { fetch } from "expo/fetch";
-
-function dateKey(d: Date) {
-  return d.toISOString().split("T")[0];
-}
 
 function formatTime(iso: string) {
   const d = new Date(iso);
@@ -90,7 +87,7 @@ function DayStrip({
 
   const days = useMemo(() => {
     const result = [];
-    const base = new Date(selected);
+    const base = desdeClave(selected);
     for (let i = -radio; i <= radio; i++) {
       const d = new Date(base);
       d.setDate(base.getDate() + i);
@@ -99,11 +96,7 @@ function DayStrip({
     return result;
   }, [selected, radio]);
 
-  const mover = (días: number) => {
-    const d = new Date(selected);
-    d.setDate(d.getDate() + días);
-    onSelect(dateKey(d));
-  };
+  const mover = (días: number) => onSelect(sumarDias(selected, días));
 
   return (
     <GlassSurface tone="neutral" intensity={Blur.panel} radius={Radius.panel} style={styles.dayStrip}>
@@ -112,7 +105,7 @@ function DayStrip({
       </Pressable>
       <View style={styles.dayStripContent}>
         {days.map((d) => {
-          const key = dateKey(d);
+          const key = claveDiaLocal(d);
           const isSelected = key === selected;
           const hasAppts = appointmentDates.has(key);
           return (
@@ -198,9 +191,9 @@ function DayList({
 }
 
 export default function HomeScreen() {
-  const { user, isOwnerOrAdmin } = useAuth();
+  const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(dateKey(new Date()));
+  const [selectedDate, setSelectedDate] = useState(ahoraClave());
 
   const { data: appointments, isLoading, refetch } = useQuery<any[]>({
     queryKey: ["/api/appointments", selectedDate],
@@ -231,8 +224,8 @@ export default function HomeScreen() {
 
   const appointmentDates = useMemo(() => {
     const set = new Set<string>();
-    (monthAppts || []).forEach((a: any) => set.add(a.dateTimeStart.split("T")[0]));
-    (appointments || []).forEach((a: any) => set.add(a.dateTimeStart.split("T")[0]));
+    (monthAppts || []).forEach((a: any) => set.add(claveDiaISO(a.dateTimeStart)));
+    (appointments || []).forEach((a: any) => set.add(claveDiaISO(a.dateTimeStart)));
     return set;
   }, [monthAppts, appointments]);
 
@@ -242,14 +235,19 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [refetch]);
 
+  // Solo la facialista ve "sus" citas; la dueña y la recepcionista ven el día entero.
+  // Antes el filtro era "todo el mundo menos la dueña ve lo suyo", y como la
+  // recepcionista **nunca** es la profesional de una cita, su pantalla salía siempre
+  // vacía. Deuda §27.
+  const soloMias = user?.role === "FACIALIST";
   const myAppts = useMemo(
-    () => (appointments || []).filter((a) => (isOwnerOrAdmin ? true : a.staffId === user?.id)),
-    [appointments, isOwnerOrAdmin, user?.id],
+    () => (appointments || []).filter((a) => (soloMias ? a.staffId === user?.id : true)),
+    [appointments, soloMias, user?.id],
   );
 
   const dateLabel = useMemo(() => {
-    const d = new Date(selectedDate + "T12:00:00");
-    const isToday = selectedDate === dateKey(new Date());
+    const d = desdeClave(selectedDate);
+    const isToday = selectedDate === ahoraClave();
     const label = d.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
     return isToday ? `Hoy, ${label}` : label;
   }, [selectedDate]);

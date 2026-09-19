@@ -6,7 +6,7 @@ import { screen, fireEvent, waitFor } from "@testing-library/react-native";
 import NewAppointmentScreen from "@/app/appointment/new";
 import {
   renderScreen, resetApi, mockApi, apiCalls, mockRouter, pressIcon,
-  __setAuthUser, __resetAuth, fixtures,
+  __setAuthUser, __resetAuth, fixtures, elegirFecha, elegirHora,
 } from "../../setup/screen-harness";
 
 let alertSpy: jest.SpyInstance;
@@ -49,11 +49,10 @@ async function elegirStaff(nombre: string) {
   fireEvent.press(screen.getByText(nombre));
 }
 
-function rellenarHorario(fecha = "2026-11-05", inicio = "10:00", fin = "11:00") {
-  fireEvent.changeText(screen.getByPlaceholderText("YYYY-MM-DD"), fecha);
-  const horas = screen.getAllByPlaceholderText("HH:MM");
-  fireEvent.changeText(horas[0], inicio);
-  fireEvent.changeText(horas[1], fin);
+async function rellenarHorario(fecha = "2026-11-05", inicio = "10:00", fin = "11:00") {
+  await elegirFecha("Fecha", fecha);
+  await elegirHora("Hora inicio", inicio);
+  await elegirHora("Hora fin", fin);
 }
 
 describe("formulario de nueva cita", () => {
@@ -157,7 +156,7 @@ describe("crear la cita", () => {
     await abrir();
     await elegirCliente("Ana Gómez");
     await elegirStaff("Lucía");
-    rellenarHorario("2026-11-05", "10:00", "11:30");
+    await rellenarHorario("2026-11-05", "10:00", "11:30");
 
     fireEvent.press(screen.getByText("Crear cita"));
 
@@ -179,7 +178,7 @@ describe("crear la cita", () => {
     fireEvent.press(screen.getByText("LASER"));
     await elegirCliente("Ana Gómez");
     await elegirStaff("Dueña");
-    rellenarHorario();
+    await rellenarHorario();
 
     fireEvent.press(screen.getByText("Crear cita"));
 
@@ -194,7 +193,7 @@ describe("crear la cita", () => {
     await abrir();
     await elegirCliente("Ana Gómez");
     await elegirStaff("Lucía");
-    rellenarHorario();
+    await rellenarHorario();
     fireEvent.changeText(screen.getByPlaceholderText("Notas sobre la cita..."), "Primera visita");
 
     fireEvent.press(screen.getByText("Crear cita"));
@@ -210,7 +209,7 @@ describe("crear la cita", () => {
     await abrir();
     await elegirCliente("Ana Gómez");
     await elegirStaff("Lucía");
-    rellenarHorario();
+    await rellenarHorario();
 
     fireEvent.press(screen.getByText("Crear cita"));
 
@@ -228,7 +227,7 @@ describe("conflictos de horario", () => {
     await abrir();
     await elegirCliente("Ana Gómez");
     await elegirStaff("Lucía");
-    rellenarHorario();
+    await rellenarHorario();
 
     fireEvent.press(screen.getByText("Crear cita"));
 
@@ -242,7 +241,7 @@ describe("conflictos de horario", () => {
     await abrir();
     await elegirCliente("Ana Gómez");
     await elegirStaff("Lucía");
-    rellenarHorario();
+    await rellenarHorario();
 
     fireEvent.press(screen.getByText("Crear cita"));
 
@@ -256,7 +255,7 @@ describe("conflictos de horario", () => {
     await abrir();
     await elegirCliente("Ana Gómez");
     await elegirStaff("Lucía");
-    rellenarHorario();
+    await rellenarHorario();
 
     fireEvent.press(screen.getByText("Crear cita"));
 
@@ -268,7 +267,7 @@ describe("conflictos de horario", () => {
     await abrir();
     await elegirCliente("Ana Gómez");
     await elegirStaff("Lucía");
-    rellenarHorario();
+    await rellenarHorario();
 
     fireEvent.press(screen.getByText("Crear cita"));
 
@@ -280,7 +279,7 @@ describe("conflictos de horario", () => {
     await abrir();
     await elegirCliente("Ana Gómez");
     await elegirStaff("Lucía");
-    rellenarHorario();
+    await rellenarHorario();
 
     fireEvent.press(screen.getByText("Crear cita"));
 

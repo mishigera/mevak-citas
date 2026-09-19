@@ -6,9 +6,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import { Radius, Space } from "@/constants/theme";
 import { Screen, ScreenScroll } from "@/components/Screen";
-import { GlassCard, GlassIconButton } from "@/components/glass";
+import { GlassCard, GlassIconButton, GlassSegmented } from "@/components/glass";
 import { PressableMotion, Stagger } from "@/components/motion";
 import { BotonPrimario, CampoTexto, PanelFormulario } from "@/components/Formulario";
+import { CampoFecha, CampoHora } from "@/components/CampoFechaHora";
+import { useAuth } from "@/contexts/auth";
+import { ahoraClave } from "@/lib/fecha";
 import { CargandoLista, EstadoVacio } from "@/components/Estados";
 import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
@@ -19,14 +22,20 @@ function formatDateTime(iso: string) {
   return d.toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+type Alcance = "SELF" | "CENTER";
+
 export default function BlocksScreen() {
   const qc = useQueryClient();
+  const { user, canManageAgenda } = useAuth();
   const [showForm, setShowForm] = useState(false);
-  const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
+  const [startDate, setStartDate] = useState(ahoraClave());
   const [startTime, setStartTime] = useState("08:00");
-  const [endDate, setEndDate] = useState(new Date().toISOString().split("T")[0]);
+  const [endDate, setEndDate] = useState(ahoraClave());
   const [endTime, setEndTime] = useState("18:00");
   const [reason, setReason] = useState("");
+  // La recepcionista no tiene agenda propia: lo único que tiene sentido que cree es el
+  // cierre del centro, así que su formulario arranca ya en "todo el centro".
+  const [alcance, setAlcance] = useState<Alcance>(user?.role === "RECEPTION" ? "CENTER" : "SELF");
 
   const { data: blocks, isLoading } = useQuery<any[]>({
     queryKey: ["/api/blocks"],
@@ -44,6 +53,7 @@ export default function BlocksScreen() {
         startDateTime: `${startDate}T${startTime}:00`,
         endDateTime: `${endDate}T${endTime}:00`,
         reason: reason.trim() || undefined,
+        scope: alcance,
       });
     },
     onSuccess: () => {
@@ -72,7 +82,7 @@ export default function BlocksScreen() {
 
   return (
     <Screen
-      title="Mis bloqueos"
+      title="Bloqueos"
       hasTabBar={false}
       backIcon="close"
       onBack={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))}
@@ -88,41 +98,23 @@ export default function BlocksScreen() {
       <ScreenScroll contentStyle={styles.columna}>
         {showForm && (
           <PanelFormulario titulo="Nuevo bloqueo">
+            {canManageAgenda && (
+              <GlassSegmented
+                options={[
+                  { value: "SELF", label: "Mi agenda" },
+                  { value: "CENTER", label: "Todo el centro" },
+                ]}
+                value={alcance}
+                onChange={setAlcance}
+              />
+            )}
             <View style={styles.fila}>
-              <CampoTexto
-                style={styles.mitad}
-                etiqueta="Fecha inicio"
-                value={startDate}
-                onChangeText={setStartDate}
-                placeholder="YYYY-MM-DD"
-                keyboardType="numeric"
-              />
-              <CampoTexto
-                style={styles.mitad}
-                etiqueta="Hora inicio"
-                value={startTime}
-                onChangeText={setStartTime}
-                placeholder="HH:MM"
-                keyboardType="numeric"
-              />
+              <CampoFecha style={styles.mitad} etiqueta="Fecha inicio" value={startDate} onChange={setStartDate} />
+              <CampoHora style={styles.mitad} etiqueta="Hora inicio" value={startTime} onChange={setStartTime} />
             </View>
             <View style={styles.fila}>
-              <CampoTexto
-                style={styles.mitad}
-                etiqueta="Fecha fin"
-                value={endDate}
-                onChangeText={setEndDate}
-                placeholder="YYYY-MM-DD"
-                keyboardType="numeric"
-              />
-              <CampoTexto
-                style={styles.mitad}
-                etiqueta="Hora fin"
-                value={endTime}
-                onChangeText={setEndTime}
-                placeholder="HH:MM"
-                keyboardType="numeric"
-              />
+              <CampoFecha style={styles.mitad} etiqueta="Fecha fin" value={endDate} onChange={setEndDate} />
+              <CampoHora style={styles.mitad} etiqueta="Hora fin" value={endTime} onChange={setEndTime} />
             </View>
             <CampoTexto
               etiqueta="Razón (opcional)"
@@ -151,28 +143,42 @@ export default function BlocksScreen() {
           />
         ) : (
           <Stagger style={styles.lista}>
-            {blocks.map((b) => (
-              <GlassCard key={b.id} radius={Radius.card}>
-                <View style={styles.bloqueFila}>
-                  <View style={styles.bloqueIcono}>
-                    <Ionicons name="ban" size={22} color={Colors.warning} />
+            {blocks.map((b) => {
+              const esDelCentro = !b.userId;
+              const esMio = b.userId === user?.id;
+              const puedeBorrar = esMio || canManageAgenda;
+              return (
+                <GlassCard key={b.id} radius={Radius.card}>
+                  <View style={styles.bloqueFila}>
+                    <View style={[styles.bloqueIcono, esDelCentro && styles.bloqueIconoCentro]}>
+                      <Ionicons
+                        name={esDelCentro ? "home" : "ban"}
+                        size={22}
+                        color={esDelCentro ? Colors.secondary : Colors.warning}
+                      />
+                    </View>
+                    <View style={styles.bloqueContenido}>
+                      <Text style={styles.bloqueDe}>
+                        {esDelCentro ? "Centro cerrado" : esMio ? "Mi agenda" : b.user?.name || "Staff"}
+                      </Text>
+                      <Text style={styles.bloqueFecha}>{formatDateTime(b.startDateTime)}</Text>
+                      <Text style={styles.bloqueFecha}>{formatDateTime(b.endDateTime)}</Text>
+                      {b.reason && <Text style={styles.bloqueRazon}>{b.reason}</Text>}
+                    </View>
+                    {puedeBorrar && (
+                      <PressableMotion
+                        gesto="escala"
+                        hitSlop={8}
+                        accessibilityLabel="Eliminar bloqueo"
+                        onPress={() => handleDelete(b.id)}
+                      >
+                        <Ionicons name="trash-outline" size={20} color={Colors.error} />
+                      </PressableMotion>
+                    )}
                   </View>
-                  <View style={styles.bloqueContenido}>
-                    <Text style={styles.bloqueFecha}>{formatDateTime(b.startDateTime)}</Text>
-                    <Text style={styles.bloqueFecha}>{formatDateTime(b.endDateTime)}</Text>
-                    {b.reason && <Text style={styles.bloqueRazon}>{b.reason}</Text>}
-                  </View>
-                  <PressableMotion
-                    gesto="escala"
-                    hitSlop={8}
-                    accessibilityLabel="Eliminar bloqueo"
-                    onPress={() => handleDelete(b.id)}
-                  >
-                    <Ionicons name="trash-outline" size={20} color={Colors.error} />
-                  </PressableMotion>
-                </View>
-              </GlassCard>
-            ))}
+                </GlassCard>
+              );
+            })}
           </Stagger>
         )}
       </ScreenScroll>
@@ -194,7 +200,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  bloqueIconoCentro: { backgroundColor: Colors.secondary + "20" },
   bloqueContenido: { flex: 1, gap: 2 },
+  bloqueDe: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.primaryDark },
   bloqueFecha: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.text },
   bloqueRazon: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted, marginTop: 2 },
 });

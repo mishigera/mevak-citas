@@ -125,12 +125,11 @@ describe("pantalla Más", () => {
     abrir("OWNER");
 
     expect(screen.getByText("María Fernanda López")).toBeTruthy();
-    expect(screen.getByText("Propietaria / Laserista")).toBeTruthy();
+    expect(screen.getByText("Dueña / Laserista")).toBeTruthy();
   });
 
   it.each([
-    ["ADMIN", "Administrador"],
-    ["OWNER", "Propietaria / Laserista"],
+    ["OWNER", "Dueña / Laserista"],
     ["RECEPTION", "Recepcionista"],
     ["FACIALIST", "Facialista"],
   ] as const)("traduce el rol %s", (role, etiqueta) => {
@@ -139,10 +138,11 @@ describe("pantalla Más", () => {
   });
 
   describe("menú según permisos", () => {
-    it("ADMIN ve todo", () => {
-      abrir("ADMIN");
+    /** ADR-0005: la dueña ya no tiene que elegir entre atender y administrar. */
+    it("OWNER ve todo, incluidos los catálogos y los usuarios", () => {
+      abrir("OWNER");
 
-      expect(screen.getByText("Mis bloqueos")).toBeTruthy();
+      expect(screen.getByText("Bloqueos")).toBeTruthy();
       expect(screen.getByText("Pagos pendientes facialistas")).toBeTruthy();
       expect(screen.getByText("Reporte de ingresos")).toBeTruthy();
       expect(screen.getByText("Servicios")).toBeTruthy();
@@ -150,20 +150,11 @@ describe("pantalla Más", () => {
       expect(screen.getByText("Usuarios")).toBeTruthy();
     });
 
-    it("OWNER no gestiona catálogos ni usuarios", () => {
-      abrir("OWNER");
-
-      expect(screen.getByText("Mis bloqueos")).toBeTruthy();
-      expect(screen.getByText("Pagos pendientes facialistas")).toBeTruthy();
-      expect(screen.getByText("Reporte de ingresos")).toBeTruthy();
-      expect(screen.queryByText("Servicios")).toBeNull();
-      expect(screen.queryByText("Usuarios")).toBeNull();
-    });
-
-    it("RECEPTION no ve dinero, ni catálogos, ni bloqueos", () => {
+    /** Deuda §29: recepción es quien agenda, tiene que poder cerrar el centro. */
+    it("RECEPTION gestiona bloqueos pero no ve dinero ni catálogos", () => {
       abrir("RECEPTION");
 
-      expect(screen.queryByText("Mis bloqueos")).toBeNull();
+      expect(screen.getByText("Bloqueos")).toBeTruthy();
       expect(screen.queryByText("Pagos pendientes facialistas")).toBeNull();
       expect(screen.queryByText("Reporte de ingresos")).toBeNull();
       expect(screen.queryByText("Servicios")).toBeNull();
@@ -173,7 +164,7 @@ describe("pantalla Más", () => {
     it("FACIALIST solo gestiona sus bloqueos", () => {
       abrir("FACIALIST");
 
-      expect(screen.getByText("Mis bloqueos")).toBeTruthy();
+      expect(screen.getByText("Bloqueos")).toBeTruthy();
       expect(screen.queryByText("Pagos pendientes facialistas")).toBeNull();
       expect(screen.queryByText("Reporte de ingresos")).toBeNull();
     });
@@ -181,14 +172,14 @@ describe("pantalla Más", () => {
 
   describe("navegación del menú", () => {
     it.each([
-      ["Mis bloqueos", "/blocks"],
+      ["Bloqueos", "/blocks"],
       ["Pagos pendientes facialistas", "/admin/payments"],
       ["Reporte de ingresos", "/admin/reports"],
       ["Servicios", "/admin/services"],
       ["Paquetes", "/admin/packages"],
       ["Usuarios", "/admin/users"],
     ])("%s lleva a %s", (etiqueta, ruta) => {
-      abrir("ADMIN");
+      abrir("OWNER");
 
       fireEvent.press(screen.getByText(etiqueta));
 

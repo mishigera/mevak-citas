@@ -17,7 +17,7 @@ let alertSpy: jest.SpyInstance;
 beforeEach(() => {
   resetApi();
   __resetAuth();
-  __setAuthUser({ id: "u1", name: "Jefa", email: "a@m.test", role: "ADMIN" });
+  __setAuthUser({ id: "u1", name: "Jefa", email: "a@m.test", role: "OWNER" });
   Object.values(mockRouter).forEach((m) => m.mockClear());
   alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });

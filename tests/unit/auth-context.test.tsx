@@ -70,11 +70,11 @@ describe("restaurar sesión guardada", () => {
   });
 
   it("refresca los datos del usuario con lo que responde el servidor", async () => {
-    mockFetch.mockResolvedValue(ok({ ...usuario(), name: "Nombre Nuevo", role: "ADMIN" }));
+    mockFetch.mockResolvedValue(ok({ ...usuario(), name: "Nombre Nuevo", role: "OWNER" }));
 
     const { result } = await montar();
 
-    expect(result.current.user).toMatchObject({ name: "Nombre Nuevo", role: "ADMIN" });
+    expect(result.current.user).toMatchObject({ name: "Nombre Nuevo", role: "OWNER" });
     expect(JSON.parse((await AsyncStorage.getItem("auth_user"))!)).toMatchObject({ name: "Nombre Nuevo" });
   });
 
@@ -211,10 +211,9 @@ describe("permisos por rol", () => {
    * La tabla debe coincidir con `tests/server/routes.permissions.test.ts`.
    */
   const esperado: Record<Role, Record<string, boolean>> = {
-    ADMIN: { canViewClinical: true, canManageServices: true, canViewReports: true, canCreateBlocks: true, isOwnerOrAdmin: true },
-    OWNER: { canViewClinical: true, canManageServices: false, canViewReports: true, canCreateBlocks: true, isOwnerOrAdmin: true },
-    RECEPTION: { canViewClinical: false, canManageServices: false, canViewReports: false, canCreateBlocks: false, isOwnerOrAdmin: false },
-    FACIALIST: { canViewClinical: false, canManageServices: false, canViewReports: false, canCreateBlocks: true, isOwnerOrAdmin: false },
+    OWNER: { canViewClinical: true, canManageServices: true, canViewReports: true, canCreateBlocks: true, canManageAgenda: true, isOwner: true },
+    RECEPTION: { canViewClinical: false, canManageServices: false, canViewReports: false, canCreateBlocks: true, canManageAgenda: true, isOwner: false },
+    FACIALIST: { canViewClinical: false, canManageServices: false, canViewReports: false, canCreateBlocks: true, canManageAgenda: false, isOwner: false },
   };
 
   it.each(Object.keys(esperado) as Role[])("%s tiene los flags correctos", async (role) => {
@@ -238,12 +237,13 @@ describe("permisos por rol", () => {
     expect(result.current.canManageServices).toBe(false);
     expect(result.current.canViewReports).toBe(false);
     expect(result.current.canCreateBlocks).toBe(false);
-    expect(result.current.isOwnerOrAdmin).toBe(false);
+    expect(result.current.canManageAgenda).toBe(false);
+    expect(result.current.isOwner).toBe(false);
   });
 
   it("los permisos se cierran al salir", async () => {
     const { result } = await montar();
-    mockFetch.mockResolvedValue(ok({ token: "t", ...usuario("ADMIN") }));
+    mockFetch.mockResolvedValue(ok({ token: "t", ...usuario("OWNER") }));
     await act(async () => {
       await result.current.login("x@y.z", "p");
     });

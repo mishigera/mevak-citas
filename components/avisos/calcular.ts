@@ -10,6 +10,7 @@
  * avisos. Sin red, sin estado, y comprobable de un vistazo en los tests.
  */
 import { Colors } from "@/constants/colors";
+import { claveDiaISO, claveDiaLocal } from "@/lib/fecha";
 
 export type TipoAviso = "PROXIMA" | "ESPERANDO" | "SIN_CERRAR" | "PAGO_PENDIENTE" | "BLOQUEO";
 
@@ -71,9 +72,14 @@ function dinero(cantidad = 0): string {
   return `$${Math.round(cantidad).toLocaleString("es-MX")}`;
 }
 
-/** La misma clave de día que usan el inicio y la agenda: el día en UTC del ISO. */
+/**
+ * La misma clave de día que usan el inicio y la agenda.
+ *
+ * Para un ISO guardado es su prefijo —el dato ya está en hora local del centro— y para
+ * un `Date` es `claveDiaLocal`, nunca `toISOString()`. Ver `lib/fecha.ts` y ADR-0004.
+ */
 export function claveDia(iso: string): string {
-  return iso.slice(0, 10);
+  return claveDiaISO(iso);
 }
 
 export function calcularAvisos({
@@ -159,7 +165,7 @@ export function calcularAvisos({
     const inicio = new Date(bloqueo.startDateTime).getTime();
     const fin = new Date(bloqueo.endDateTime).getTime();
     // Solo interesa el bloqueo que afecta a lo que queda de hoy.
-    if (fin < t || claveDia(bloqueo.startDateTime) !== claveDia(ahora.toISOString())) continue;
+    if (fin < t || claveDia(bloqueo.startDateTime) !== claveDiaLocal(ahora)) continue;
     const motivo = bloqueo.reason?.trim();
     avisos.push({
       id: `BLOQUEO-${bloqueo.id}`,
@@ -182,9 +188,9 @@ export type GrupoAvisos = { clave: string; etiqueta: string; avisos: Aviso[] };
 
 /** Agrupa por día conservando el orden, y nombra el día como lo diría una persona. */
 export function agruparPorDia(avisos: Aviso[], ahora = new Date()): GrupoAvisos[] {
-  const hoy = claveDia(ahora.toISOString());
-  const ayer = claveDia(new Date(ahora.getTime() - 86_400_000).toISOString());
-  const manana = claveDia(new Date(ahora.getTime() + 86_400_000).toISOString());
+  const hoy = claveDiaLocal(ahora);
+  const ayer = claveDiaLocal(new Date(ahora.getTime() - 86_400_000));
+  const manana = claveDiaLocal(new Date(ahora.getTime() + 86_400_000));
 
   const grupos: GrupoAvisos[] = [];
   for (const aviso of avisos) {

@@ -203,13 +203,8 @@ describe("editar cita", () => {
     expect(res.status).toBe(200);
   });
 
-  /**
-   * DEUDA §8 — hueco conocido.
-   * POST valida bloqueos (routes.ts:306-312); PATCH no (routes.ts:322-330).
-   * Marcado como `failing`: hoy pasa por el agujero. Cuando se arregle el código,
-   * este test empezará a pasar y Jest avisará de que hay que quitarle el `.failing`.
-   */
-  it.failing("debería rechazar mover una cita encima de un bloqueo", async () => {
+  /** Deuda §8, cerrada en p005 fase A: el PATCH valida bloqueos igual que el POST. */
+  it("rechaza mover una cita encima de un bloqueo", async () => {
     const bloqueo = aBlock({ id: "b1", userId: STAFF,
       startDateTime: "2026-10-05T09:00:00.000Z", endDateTime: "2026-10-05T13:00:00.000Z" });
     const { app, token } = await setup({ appointments: [cita], availabilityBlocks: [bloqueo] });
@@ -265,5 +260,121 @@ describe("consultar citas", () => {
       .set("Authorization", `Bearer ${token}`);
 
     expect(res.body.map((a: { id: string }) => a.id)).toEqual(["nueva", "media", "vieja"]);
+  });
+});
+
+/**
+ * Deuda §30 — una fecha mal tecleada entraba entera.
+ *
+ * `new Date("18/09/2026T10:00")` es `NaN`, y **toda comparación con `NaN` es `false`**:
+ * la detección de solapes y la de bloqueos se apagaban solas, la cita se guardaba con
+ * una fecha basura y no aparecía en ningún día, porque el filtro es `startsWith`.
+ */
+describe("validación de fechas al crear y mover citas", () => {
+  const FECHAS_MALAS = [
+    ["formato del día a la europea", "18/09/2026T10:00:00"],
+    ["texto cualquiera", "mañana a las 10"],
+    ["mes que no existe", "2026-13-45T10:00:00"],
+    ["cadena vacía", " "],
+  ] as const;
+
+  it.each(FECHAS_MALAS)("400 al crear con %s", async (_desc, mala) => {
+    const { app, token } = await setup();
+    const res = await crear(app, token, { ...base, dateTimeStart: mala });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/fecha inválid/i);
+  });
+
+  it("una fecha inválida no crea nada", async () => {
+    const { app, storage, token } = await setup();
+    await crear(app, token, { ...base, dateTimeEnd: "no es una fecha" });
+
+    expect(storage.appointments.snapshotValues()).toHaveLength(0);
+  });
+
+  it("400 si la cita termina antes de empezar", async () => {
+    const { app, token } = await setup();
+    const res = await crear(app, token, {
+      ...base,
+      dateTimeStart: "2026-10-01T11:00:00.000Z",
+      dateTimeEnd: "2026-10-01T10:00:00.000Z",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/mayor a inicio/i);
+  });
+
+  it("400 si empieza y termina a la vez", async () => {
+    const { app, token } = await setup();
+    const res = await crear(app, token, { ...base, dateTimeEnd: base.dateTimeStart });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("con fecha basura, el solape SÍ se comprueba en vez de colarse", async () => {
+    // Antes esta cita se creaba encima de la otra sin protestar.
+    const { app, token } = await setup({ appointments: [anAppointment({ id: "ya-esta" })] });
+    const res = await crear(app, token, { ...base, dateTimeStart: "basura" });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("400 al mover una cita a una fecha inválida", async () => {
+    const { app, token } = await setup({ appointments: [anAppointment({ id: "a1" })] });
+    const res = await request(app).patch("/api/appointments/a1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ dateTimeStart: "32/10/2026T10:00:00" });
+
+    expect(res.status).toBe(400);
+  });
+});
+
+/** Deuda §29 — el bloqueo de centro no existía: había que crear uno por persona. */
+describe("bloqueo de centro", () => {
+  const cierre = {
+    id: "b-centro", userId: null,
+    startDateTime: "2026-10-01T09:00:00.000Z", endDateTime: "2026-10-01T18:00:00.000Z",
+    reason: "Día festivo",
+  };
+
+  it("impide agendar a cualquiera del staff, no solo a una", async () => {
+    const { app, token } = await setup({ availabilityBlocks: [cierre] });
+
+    for (const staffId of [STAFF, OTRO_STAFF]) {
+      const res = await crear(app, token, { ...base, staffId });
+      expect({ staffId, status: res.status }).toEqual({ staffId, status: 409 });
+    }
+  });
+
+  it("el mensaje dice que es el centro, no que sea de alguien", async () => {
+    const { app, token } = await setup({ availabilityBlocks: [cierre] });
+    const res = await crear(app, token, base);
+
+    expect(res.body.message).toMatch(/centro está cerrado/i);
+  });
+
+  it("tampoco deja mover una cita a ese hueco", async () => {
+    const { app, token } = await setup({
+      appointments: [anAppointment({ id: "a1", dateTimeStart: "2026-10-05T10:00:00.000Z", dateTimeEnd: "2026-10-05T11:00:00.000Z" })],
+      availabilityBlocks: [cierre],
+    });
+
+    const res = await request(app).patch("/api/appointments/a1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ dateTimeStart: "2026-10-01T10:00:00.000Z", dateTimeEnd: "2026-10-01T11:00:00.000Z" });
+
+    expect(res.status).toBe(409);
+  });
+
+  it("fuera de su horario no estorba", async () => {
+    const { app, token } = await setup({ availabilityBlocks: [cierre] });
+    const res = await crear(app, token, {
+      ...base,
+      dateTimeStart: "2026-10-02T10:00:00.000Z",
+      dateTimeEnd: "2026-10-02T11:00:00.000Z",
+    });
+
+    expect(res.status).toBe(201);
   });
 });

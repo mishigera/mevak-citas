@@ -9,6 +9,8 @@ import { Screen, ScreenScroll } from "@/components/Screen";
 import { GlassPopover, GlassSegmented, GlassSurface } from "@/components/glass";
 import { PressableMotion, Stagger } from "@/components/motion";
 import { BotonPrimario, CampoTexto } from "@/components/Formulario";
+import { CampoFecha, CampoHora } from "@/components/CampoFechaHora";
+import { ahoraClave } from "@/lib/fecha";
 import { ApiError, apiRequest, getApiUrl, getAuthToken, getErrorMessage } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
@@ -78,7 +80,7 @@ export default function NewAppointmentScreen() {
   const [staffId, setStaffId] = useState<string>(params.staffId as string || "");
   const [staffName, setStaffName] = useState<string>(params.staffName as string || "");
   const [type, setType] = useState<"FACIAL" | "LASER">((params.type as "FACIAL" | "LASER") || "FACIAL");
-  const [date, setDate] = useState<string>((params.date as string) || new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState<string>((params.date as string) || ahoraClave());
   const [startTime, setStartTime] = useState<string>("10:00");
   const [endTime, setEndTime] = useState<string>("11:00");
   const [notes, setNotes] = useState<string>("");
@@ -141,6 +143,19 @@ export default function NewAppointmentScreen() {
       Alert.alert("Error", message);
     },
   });
+
+  /**
+   * Mover el inicio arrastra el fin con la misma duración. Sin esto es facilísimo dejar
+   * un fin anterior al inicio, que ahora el servidor rechaza con un 400.
+   */
+  const alCambiarInicio = (nuevo: string) => {
+    const minutos = (h: string) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
+    const duración = Math.max(minutos(endTime) - minutos(startTime), 15);
+    const fin = minutos(nuevo) + duración;
+    const horas = Math.min(Math.floor(fin / 60), 23);
+    setStartTime(nuevo);
+    setEndTime(`${String(horas).padStart(2, "0")}:${String(fin % 60).padStart(2, "0")}`);
+  };
 
   const filteredClients = (clients || []).filter((c) =>
     c.fullName.toLowerCase().includes(clientSearch.toLowerCase())
@@ -243,27 +258,11 @@ export default function NewAppointmentScreen() {
             </Selector>
           </View>
 
-          <CampoTexto
-            etiqueta="Fecha"
-            value={date}
-            onChangeText={setDate}
-            placeholder="YYYY-MM-DD"
-            keyboardType="numeric"
-          />
-          <CampoTexto
-            etiqueta="Hora inicio"
-            value={startTime}
-            onChangeText={setStartTime}
-            placeholder="HH:MM"
-            keyboardType="numeric"
-          />
-          <CampoTexto
-            etiqueta="Hora fin"
-            value={endTime}
-            onChangeText={setEndTime}
-            placeholder="HH:MM"
-            keyboardType="numeric"
-          />
+          <CampoFecha etiqueta="Fecha" value={date} onChange={setDate} />
+          <View style={styles.fila}>
+            <CampoHora etiqueta="Hora inicio" value={startTime} onChange={alCambiarInicio} style={styles.mitad} />
+            <CampoHora etiqueta="Hora fin" value={endTime} onChange={setEndTime} style={styles.mitad} />
+          </View>
           <CampoTexto
             etiqueta="Notas (opcional)"
             value={notes}
@@ -311,6 +310,8 @@ const styles = StyleSheet.create({
   opcionTexto: { fontFamily: "Nunito_600SemiBold", fontSize: 15, color: Colors.text },
   opcionSub: { fontFamily: "Nunito_400Regular", fontSize: 13, color: Colors.textMuted, marginTop: 1 },
 
+  fila: { flexDirection: "row", gap: Space.md },
+  mitad: { flex: 1 },
   notas: { minHeight: 80, textAlignVertical: "top" },
   crear: { marginTop: Space.sm, paddingVertical: Space.lg },
 });

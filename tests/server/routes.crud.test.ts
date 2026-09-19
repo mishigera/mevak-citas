@@ -6,7 +6,7 @@ import {
   buildApp, authAs, aClient, anAppointment, aService, aPackage, aClientPackage, aBlock,
 } from "../setup/server-harness";
 
-const ROLES = ["ADMIN", "OWNER", "RECEPTION", "FACIALIST"] as const;
+const ROLES = ["OWNER", "RECEPTION", "FACIALIST"] as const;
 
 async function setup(over: Record<string, unknown[]> = {}) {
   const users = ROLES.map((role) => ({
@@ -28,7 +28,7 @@ const as = (app: Express, token: string) => ({
 describe("usuarios", () => {
   it("crea un usuario y devuelve sus datos sin el hash", async () => {
     const { app, tokens } = await setup();
-    const res = await as(app, tokens.ADMIN).post("/api/users", {
+    const res = await as(app, tokens.OWNER).post("/api/users", {
       name: "Nueva", email: "nueva@m.test", password: "secreta", role: "FACIALIST",
     });
 
@@ -39,7 +39,7 @@ describe("usuarios", () => {
 
   it("guarda la contraseña hasheada, nunca en claro", async () => {
     const { app, storage, tokens } = await setup();
-    const res = await as(app, tokens.ADMIN).post("/api/users", {
+    const res = await as(app, tokens.OWNER).post("/api/users", {
       name: "N", email: "n@m.test", password: "en-claro", role: "RECEPTION",
     });
 
@@ -49,19 +49,19 @@ describe("usuarios", () => {
   });
 
   it.each([
-    ["name", { email: "a@b.c", password: "p", role: "ADMIN" }],
-    ["email", { name: "N", password: "p", role: "ADMIN" }],
-    ["password", { name: "N", email: "a@b.c", role: "ADMIN" }],
+    ["name", { email: "a@b.c", password: "p", role: "OWNER" }],
+    ["email", { name: "N", password: "p", role: "OWNER" }],
+    ["password", { name: "N", email: "a@b.c", role: "OWNER" }],
     ["role", { name: "N", email: "a@b.c", password: "p" }],
   ])("400 si falta %s", async (_c, body) => {
     const { app, tokens } = await setup();
-    expect((await as(app, tokens.ADMIN).post("/api/users", body)).status).toBe(400);
+    expect((await as(app, tokens.OWNER).post("/api/users", body)).status).toBe(400);
   });
 
   it("rechaza email duplicado", async () => {
     const { app, tokens } = await setup();
-    const res = await as(app, tokens.ADMIN).post("/api/users", {
-      name: "Dup", email: "admin@m.test", password: "p", role: "ADMIN",
+    const res = await as(app, tokens.OWNER).post("/api/users", {
+      name: "Dup", email: "owner@m.test", password: "p", role: "OWNER",
     });
 
     expect(res.status).toBe(400);
@@ -70,7 +70,7 @@ describe("usuarios", () => {
 
   it("edita nombre y rol", async () => {
     const { app, storage, tokens } = await setup();
-    const res = await as(app, tokens.ADMIN).patch("/api/users/u-RECEPTION", {
+    const res = await as(app, tokens.OWNER).patch("/api/users/u-RECEPTION", {
       name: "Renombrada", role: "OWNER",
     });
 
@@ -80,7 +80,7 @@ describe("usuarios", () => {
 
   it("puede desactivar a un usuario", async () => {
     const { app, storage, tokens } = await setup();
-    await as(app, tokens.ADMIN).patch("/api/users/u-FACIALIST", { isActive: false });
+    await as(app, tokens.OWNER).patch("/api/users/u-FACIALIST", { isActive: false });
 
     expect(storage.users.get("u-FACIALIST")!.isActive).toBe(false);
   });
@@ -89,7 +89,7 @@ describe("usuarios", () => {
     const { app, storage, tokens } = await setup();
     const antes = storage.users.get("u-OWNER")!.passwordHash;
 
-    await as(app, tokens.ADMIN).patch("/api/users/u-OWNER", { password: "nueva-clave" });
+    await as(app, tokens.OWNER).patch("/api/users/u-OWNER", { password: "nueva-clave" });
 
     const despues = storage.users.get("u-OWNER")!.passwordHash;
     expect(despues).not.toBe(antes);
@@ -98,7 +98,7 @@ describe("usuarios", () => {
 
   it("404 al editar un usuario inexistente", async () => {
     const { app, tokens } = await setup();
-    expect((await as(app, tokens.ADMIN).patch("/api/users/nope", { name: "X" })).status).toBe(404);
+    expect((await as(app, tokens.OWNER).patch("/api/users/nope", { name: "X" })).status).toBe(404);
   });
 
   it("/api/users/staff no filtra hashes", async () => {
@@ -331,7 +331,7 @@ describe("paquetes del cliente", () => {
 describe("catálogo de servicios y paquetes", () => {
   it("crea un servicio con precio numérico", async () => {
     const { app, tokens } = await setup();
-    const res = await as(app, tokens.ADMIN).post("/api/services", { name: "Facial", type: "FACIAL", price: "750" });
+    const res = await as(app, tokens.OWNER).post("/api/services", { name: "Facial", type: "FACIAL", price: "750" });
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ name: "Facial", price: 750, isActive: true });
@@ -339,8 +339,8 @@ describe("catálogo de servicios y paquetes", () => {
 
   it("acepta precio 0 pero no un campo ausente", async () => {
     const { app, tokens } = await setup();
-    expect((await as(app, tokens.ADMIN).post("/api/services", { name: "Gratis", type: "FACIAL", price: 0 })).status).toBe(201);
-    expect((await as(app, tokens.ADMIN).post("/api/services", { name: "X", type: "FACIAL" })).status).toBe(400);
+    expect((await as(app, tokens.OWNER).post("/api/services", { name: "Gratis", type: "FACIAL", price: 0 })).status).toBe(201);
+    expect((await as(app, tokens.OWNER).post("/api/services", { name: "X", type: "FACIAL" })).status).toBe(400);
   });
 
   it("filtra servicios por tipo", async () => {
@@ -364,7 +364,7 @@ describe("catálogo de servicios y paquetes", () => {
 
   it("editar un servicio permite desactivarlo (borrado lógico)", async () => {
     const { app, storage, tokens } = await setup({ services: [aService({ id: "s1" })] });
-    const res = await as(app, tokens.ADMIN).patch("/api/services/s1", { isActive: false, price: 999 });
+    const res = await as(app, tokens.OWNER).patch("/api/services/s1", { isActive: false, price: 999 });
 
     expect(res.status).toBe(200);
     expect(storage.services.get("s1")).toMatchObject({ isActive: false, price: 999 });
@@ -372,12 +372,12 @@ describe("catálogo de servicios y paquetes", () => {
 
   it("404 al editar un servicio inexistente", async () => {
     const { app, tokens } = await setup();
-    expect((await as(app, tokens.ADMIN).patch("/api/services/nope", { price: 1 })).status).toBe(404);
+    expect((await as(app, tokens.OWNER).patch("/api/services/nope", { price: 1 })).status).toBe(404);
   });
 
   it("crea un paquete y lo marca como LASER", async () => {
     const { app, tokens } = await setup();
-    const res = await as(app, tokens.ADMIN).post("/api/packages", { name: "P6", totalSessions: "6", price: "6000" });
+    const res = await as(app, tokens.OWNER).post("/api/packages", { name: "P6", totalSessions: "6", price: "6000" });
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ type: "LASER", totalSessions: 6, price: 6000, isActive: true });
@@ -385,7 +385,7 @@ describe("catálogo de servicios y paquetes", () => {
 
   it("400 si al paquete le faltan campos", async () => {
     const { app, tokens } = await setup();
-    expect((await as(app, tokens.ADMIN).post("/api/packages", { name: "P" })).status).toBe(400);
+    expect((await as(app, tokens.OWNER).post("/api/packages", { name: "P" })).status).toBe(400);
   });
 });
 
@@ -592,7 +592,11 @@ describe("bloqueos de disponibilidad", () => {
     expect(res.body.message).toMatch(mensaje);
   });
 
-  it("cada uno ve solo sus bloqueos", async () => {
+  /**
+   * Antes cada quien veía solo los suyos y **la recepcionista no veía ninguno**, que es
+   * justo la persona que agenda: descubría el bloqueo por un 409 al guardar. Deuda §29.
+   */
+  it("todo el mundo ve los bloqueos de todo el mundo", async () => {
     const { app, tokens } = await setup({
       availabilityBlocks: [
         aBlock({ id: "b-owner", userId: "u-OWNER" }),
@@ -600,34 +604,104 @@ describe("bloqueos de disponibilidad", () => {
       ],
     });
 
-    const res = await as(app, tokens.FACIALIST).get("/api/blocks");
-
-    expect(res.body).toHaveLength(1);
-    expect(res.body[0].id).toBe("b-facial");
+    for (const rol of ROLES) {
+      const res = await as(app, tokens[rol]).get("/api/blocks");
+      expect({ rol, total: res.body.length }).toEqual({ rol, total: 2 });
+    }
   });
 
-  it("ADMIN los ve todos", async () => {
+  it("recepción ve también el bloqueo de centro, sin dueño", async () => {
     const { app, tokens } = await setup({
-      availabilityBlocks: [
-        aBlock({ id: "b-owner", userId: "u-OWNER" }),
-        aBlock({ id: "b-facial", userId: "u-FACIALIST" }),
-      ],
+      availabilityBlocks: [aBlock({ id: "b-centro", userId: null })],
     });
 
-    expect((await as(app, tokens.ADMIN).get("/api/blocks")).body).toHaveLength(2);
+    const res = await as(app, tokens.RECEPTION).get("/api/blocks");
+
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({ id: "b-centro", userId: null, user: null });
   });
 
   it("enriquece con el nombre del staff", async () => {
     const { app, tokens } = await setup({ availabilityBlocks: [aBlock({ id: "b1", userId: "u-OWNER" })] });
-    const res = await as(app, tokens.ADMIN).get("/api/blocks");
+    const res = await as(app, tokens.OWNER).get("/api/blocks");
 
     expect(res.body[0].user).toMatchObject({ id: "u-OWNER", name: "OWNER" });
   });
 
   it("user queda en null si el staff ya no existe", async () => {
     const { app, tokens } = await setup({ availabilityBlocks: [aBlock({ id: "b1", userId: "borrado" })] });
-    const res = await as(app, tokens.ADMIN).get("/api/blocks");
+    const res = await as(app, tokens.OWNER).get("/api/blocks");
 
     expect(res.body[0].user).toBeNull();
+  });
+
+  describe("a quién pertenece el bloqueo", () => {
+    const horario = {
+      startDateTime: "2026-11-02T09:00:00",
+      endDateTime: "2026-11-02T18:00:00",
+    };
+
+    it("recepción cierra el centro y el bloqueo no es de nadie", async () => {
+      const { app, storage, tokens } = await setup();
+      const res = await as(app, tokens.RECEPTION).post("/api/blocks", { ...horario, scope: "CENTER", reason: "Festivo" });
+
+      expect(res.status).toBe(201);
+      expect(res.body.userId).toBeNull();
+      expect(storage.availabilityBlocks.get(res.body.id)).toMatchObject({ userId: null });
+    });
+
+    it("la dueña también cierra el centro", async () => {
+      const { app, tokens } = await setup();
+      const res = await as(app, tokens.OWNER).post("/api/blocks", { ...horario, scope: "CENTER" });
+
+      expect(res.status).toBe(201);
+      expect(res.body.userId).toBeNull();
+    });
+
+    it("la facialista NO cierra el centro", async () => {
+      const { app, tokens } = await setup();
+      const res = await as(app, tokens.FACIALIST).post("/api/blocks", { ...horario, scope: "CENTER" });
+
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/cierran el centro/i);
+    });
+
+    it("la dueña bloquea la agenda de la facialista", async () => {
+      const { app, tokens } = await setup();
+      const res = await as(app, tokens.OWNER).post("/api/blocks", { ...horario, userId: "u-FACIALIST" });
+
+      expect(res.status).toBe(201);
+      expect(res.body.userId).toBe("u-FACIALIST");
+    });
+
+    it("la facialista NO bloquea la agenda de otra", async () => {
+      const { app, tokens } = await setup();
+      const res = await as(app, tokens.FACIALIST).post("/api/blocks", { ...horario, userId: "u-OWNER" });
+
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/agenda de otra persona/i);
+    });
+
+    it("la facialista sí bloquea la suya pasando su propio id", async () => {
+      const { app, tokens } = await setup();
+      const res = await as(app, tokens.FACIALIST).post("/api/blocks", { ...horario, userId: "u-FACIALIST" });
+
+      expect(res.status).toBe(201);
+      expect(res.body.userId).toBe("u-FACIALIST");
+    });
+
+    it("404 si la agenda es de alguien que no existe", async () => {
+      const { app, tokens } = await setup();
+      const res = await as(app, tokens.OWNER).post("/api/blocks", { ...horario, userId: "fantasma" });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("sin scope ni userId, el bloqueo es de quien lo crea", async () => {
+      const { app, tokens } = await setup();
+      const res = await as(app, tokens.FACIALIST).post("/api/blocks", horario);
+
+      expect(res.body.userId).toBe("u-FACIALIST");
+    });
   });
 });

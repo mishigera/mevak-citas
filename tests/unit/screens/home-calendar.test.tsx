@@ -114,13 +114,19 @@ describe("pantalla de inicio", () => {
       expect(screen.getByText("Clienta Ajena")).toBeTruthy();
     });
 
-    it("ADMIN también ve toda la agenda", async () => {
-      entrar("ADMIN", "u1");
+    /**
+     * Deuda §27: era el caso roto. La recepcionista nunca es la profesional de una
+     * cita, así que con el filtro viejo su pantalla de inicio salía SIEMPRE vacía.
+     */
+    it("RECEPTION ve toda la agenda del día, no una lista vacía", async () => {
+      entrar("RECEPTION", "u-recepcion");
       mockApi({ "/api/appointments": agenda });
 
       renderScreen(<HomeScreen />);
 
-      await waitFor(() => expect(screen.getByText("Clienta Ajena")).toBeTruthy());
+      await waitFor(() => expect(screen.getByText("Clienta Mía")).toBeTruthy());
+      expect(screen.getByText("Clienta Ajena")).toBeTruthy();
+      expect(screen.queryByText("Sin citas")).toBeNull();
     });
 
     it("FACIALIST solo ve las suyas", async () => {
@@ -131,16 +137,6 @@ describe("pantalla de inicio", () => {
 
       await waitFor(() => expect(screen.getByText("Clienta Mía")).toBeTruthy());
       expect(screen.queryByText("Clienta Ajena")).toBeNull();
-    });
-
-    it("RECEPTION solo ve las asignadas a su usuario", async () => {
-      entrar("RECEPTION", "u9");
-      mockApi({ "/api/appointments": agenda });
-
-      renderScreen(<HomeScreen />);
-
-      await waitFor(() => expect(screen.getByText("Clienta Ajena")).toBeTruthy());
-      expect(screen.queryByText("Clienta Mía")).toBeNull();
     });
 
     it("el contador refleja solo lo que el rol puede ver", async () => {
