@@ -151,8 +151,8 @@ export default function MoreScreen() {
           <Section title="Reportes">
             <MenuItem
               icon="bar-chart-outline"
-              label="Reporte de ingresos"
-              sublabel="Ingresos por mes"
+              label="Corte e ingresos"
+              sublabel="Caja del día y resumen del mes"
               color={Colors.secondary}
               onPress={() => router.push("/admin/reports")}
             />

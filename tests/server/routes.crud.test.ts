@@ -527,7 +527,7 @@ describe("liquidación a la facialista", () => {
 
 describe("reporte de ingresos", () => {
   const pago = (id: string, over: Record<string, unknown> = {}) => ({
-    id, appointmentId: `a-${id}`, method: "CASH", totalAmount: 1000,
+    id, appointmentId: `a-${id}`, concept: "CITA", method: "CASH", totalAmount: 1000,
     ownerNetAmount: 500, facialistNetAmount: 500, facialistPaidFlag: false,
     createdAt: "2026-09-15T12:00:00.000Z", ...over,
   });
@@ -536,7 +536,65 @@ describe("reporte de ingresos", () => {
     const { app, tokens } = await setup({ payments: [pago("p1"), pago("p2")] });
     const res = await as(app, tokens.OWNER).get("/api/reports/income");
 
-    expect(res.body).toEqual({ total: 2000, ownerNet: 1000, facialistNet: 1000, count: 2 });
+    expect(res.body).toMatchObject({ total: 2000, ownerNet: 1000, facialistNet: 1000, count: 2 });
+  });
+
+  it("desglosa por método, que es lo que cuadra la caja", async () => {
+    const { app, tokens } = await setup({
+      payments: [
+        pago("efectivo", { method: "CASH", totalAmount: 800 }),
+        pago("tarjeta", { method: "CARD", totalAmount: 1200 }),
+        pago("incluido", { method: "INCLUDED", totalAmount: 0 }),
+      ],
+    });
+
+    const res = await as(app, tokens.OWNER).get("/api/reports/income");
+
+    expect(res.body.porMetodo).toEqual({ CASH: 800, CARD: 1200, INCLUDED: 0 });
+  });
+
+  it("desglosa por concepto: citas frente a paquetes vendidos", async () => {
+    const { app, tokens } = await setup({
+      payments: [
+        pago("cita", { totalAmount: 800 }),
+        pago("venta", { concept: "PAQUETE", appointmentId: undefined, totalAmount: 6000, ownerNetAmount: 6000, facialistNetAmount: 0 }),
+      ],
+    });
+
+    const res = await as(app, tokens.OWNER).get("/api/reports/income");
+
+    expect(res.body.porConcepto).toEqual({ CITA: 800, PAQUETE: 6000 });
+  });
+
+  it("suma lo que falta liquidar a la facialista", async () => {
+    const { app, tokens } = await setup({
+      payments: [
+        pago("debido", { facialistNetAmount: 400, facialistPaidFlag: false }),
+        pago("saldado", { facialistNetAmount: 300, facialistPaidFlag: true }),
+      ],
+    });
+
+    expect((await as(app, tokens.OWNER).get("/api/reports/income")).body.pendienteFacialista).toBe(400);
+  });
+
+  /**
+   * El corte del día compara contra el reloj local, no contra el prefijo del ISO:
+   * `createdAt` lleva `Z` y después de las 18:00 en México su día ya es el siguiente.
+   */
+  it("filtra por un día concreto", async () => {
+    const dia = new Date(2026, 8, 15, 19, 30);
+    const otroDia = new Date(2026, 8, 16, 10, 0);
+    const { app, tokens } = await setup({
+      payments: [
+        pago("de-ese-dia", { createdAt: dia.toISOString() }),
+        pago("de-otro", { createdAt: otroDia.toISOString() }),
+      ],
+    });
+
+    const res = await as(app, tokens.OWNER).get("/api/reports/income?date=2026-09-15");
+
+    expect(res.body.count).toBe(1);
+    expect(res.body.total).toBe(1000);
   });
 
   it("filtra por mes y año", async () => {
@@ -557,7 +615,7 @@ describe("reporte de ingresos", () => {
   it("devuelve ceros cuando no hay pagos", async () => {
     const { app, tokens } = await setup();
     expect((await as(app, tokens.OWNER).get("/api/reports/income")).body)
-      .toEqual({ total: 0, ownerNet: 0, facialistNet: 0, count: 0 });
+      .toMatchObject({ total: 0, ownerNet: 0, facialistNet: 0, count: 0 });
   });
 
   it("ignora el filtro si solo se pasa el mes", async () => {

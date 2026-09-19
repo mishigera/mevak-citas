@@ -72,7 +72,7 @@ type Respuesta = unknown | ((body: unknown) => unknown);
 type Rutas = Record<string, Respuesta>;
 
 const rutasActivas: Rutas = {};
-const llamadas: { method: string; path: string; body: unknown }[] = [];
+const llamadas: { method: string; path: string; search: string; body: unknown }[] = [];
 
 /**
  * Define qué responde la API. Las claves son `"GET /api/clients"` o solo `"/api/clients"`
@@ -94,10 +94,13 @@ export function resetApi() {
   llamadas.length = 0;
   mockFetch.mockReset();
   mockFetch.mockImplementation(async (url: string, opciones?: { method?: string; body?: string }) => {
-    const path = new URL(url).pathname;
+    const parsed = new URL(url);
+    const path = parsed.pathname;
     const method = (opciones?.method ?? "GET").toUpperCase();
     const body = opciones?.body ? JSON.parse(opciones.body) : undefined;
-    llamadas.push({ method, path, body });
+    // `search` aparte del `path`: las rutas se resuelven por ruta, pero hay pantallas
+    // (el corte de caja, sin ir más lejos) cuyo comportamiento ESTÁ en los parámetros.
+    llamadas.push({ method, path, search: parsed.search, body });
 
     const definicion =
       rutasActivas[`${method} ${path}`] ?? rutasActivas[path] ?? undefined;

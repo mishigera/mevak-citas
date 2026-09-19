@@ -24,52 +24,96 @@ beforeEach(() => {
 afterEach(() => alertSpy.mockRestore());
 
 // ---------------------------------------------------------------- Reportes
-describe("reporte de ingresos", () => {
-  const reporte = { total: 12500, ownerNet: 9000, facialistNet: 3500, count: 14 };
+describe("corte del día e ingresos del mes", () => {
+  const reporte = {
+    total: 12500, ownerNet: 9000, facialistNet: 3500, count: 14,
+    porMetodo: { CASH: 7500, CARD: 5000, INCLUDED: 0 },
+    porConcepto: { CITA: 6500, PAQUETE: 6000 },
+    pendienteFacialista: 1200,
+  };
 
-  it("muestra el total, el reparto y el número de pagos", async () => {
+  it("muestra el total, el reparto y el número de cobros", async () => {
     mockApi({ "/api/reports/income": reporte });
     renderScreen(<ReportsScreen />);
 
-    await waitFor(() => expect(screen.getByText("$12500")).toBeTruthy());
-    expect(screen.getByText("14 pagos registrados")).toBeTruthy();
-    expect(screen.getByText("$9000")).toBeTruthy();
-    expect(screen.getByText("$3500")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("$12,500")).toBeTruthy());
+    expect(screen.getByText("14 cobros registrados")).toBeTruthy();
+    expect(screen.getByText("$9,000")).toBeTruthy();
+    expect(screen.getByText("$3,500")).toBeTruthy();
   });
 
-  it("etiqueta correctamente a quién va cada parte", async () => {
+  /** Es la cifra que se compara con lo que hay en el cajón al cerrar. */
+  it("desglosa efectivo y tarjeta", async () => {
     mockApi({ "/api/reports/income": reporte });
     renderScreen(<ReportsScreen />);
 
-    await waitFor(() => expect(screen.getByText("Owner / Laserista")).toBeTruthy());
-    expect(screen.getByText("Facialistas")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Efectivo")).toBeTruthy());
+    expect(screen.getByText("$7,500")).toBeTruthy();
+    expect(screen.getByText("Tarjeta")).toBeTruthy();
+    expect(screen.getByText("$5,000")).toBeTruthy();
   });
 
-  it("avisa cuando el mes no tiene pagos", async () => {
-    mockApi({ "/api/reports/income": { total: 0, ownerNet: 0, facialistNet: 0, count: 0 } });
+  /** Deuda §31: el dinero de los paquetes no aparecía por ninguna parte. */
+  it("separa lo cobrado en citas de los paquetes vendidos", async () => {
+    mockApi({ "/api/reports/income": reporte });
     renderScreen(<ReportsScreen />);
 
-    await waitFor(() => expect(screen.getByText("Sin datos")).toBeTruthy());
-    expect(screen.getByText(/No hay pagos registrados en/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Paquetes vendidos")).toBeTruthy());
+    expect(screen.getByText("$6,000")).toBeTruthy();
   });
 
-  it("consulta el mes y año actuales al abrir", async () => {
+  it("avisa de lo que falta liquidar a la facialista", async () => {
+    mockApi({ "/api/reports/income": reporte });
+    renderScreen(<ReportsScreen />);
+
+    await waitFor(() => expect(screen.getByText(/Falta liquidar \$1,200/)).toBeTruthy());
+  });
+
+  it("no avisa si no hay nada pendiente", async () => {
+    mockApi({ "/api/reports/income": { ...reporte, pendienteFacialista: 0 } });
+    renderScreen(<ReportsScreen />);
+
+    await waitFor(() => expect(screen.getByText("$12,500")).toBeTruthy());
+    expect(screen.queryByText(/Falta liquidar/)).toBeNull();
+  });
+
+  it("arranca en el corte del día, que es lo que se mira al cerrar", async () => {
     mockApi({ "/api/reports/income": reporte });
     renderScreen(<ReportsScreen />);
 
     await waitFor(() => expect(apiCalls().length).toBeGreaterThan(0));
-    const ahora = new Date();
-    expect(screen.getByText(new RegExp(String(ahora.getFullYear())))).toBeTruthy();
+    expect(apiCalls()[0].search).toContain("date=");
+    expect(screen.getByText("Hoy")).toBeTruthy();
+  });
+
+  it("al cambiar a Mes consulta por mes y año", async () => {
+    mockApi({ "/api/reports/income": reporte });
+    renderScreen(<ReportsScreen />);
+    await waitFor(() => expect(screen.getByText("$12,500")).toBeTruthy());
+
+    fireEvent.press(screen.getByText("Mes"));
+
+    await waitFor(() => expect(apiCalls().some((c) => c.search.includes("month="))).toBe(true));
+  });
+
+  it("el día anterior cambia la consulta", async () => {
+    mockApi({ "/api/reports/income": reporte });
+    renderScreen(<ReportsScreen />);
+    await waitFor(() => expect(screen.getByText("$12,500")).toBeTruthy());
+
+    fireEvent.press(screen.getByLabelText("Día anterior"));
+
+    await waitFor(() => expect(screen.queryByText("Hoy")).toBeNull());
   });
 
   it("retrocede de enero a diciembre del año anterior", async () => {
     mockApi({ "/api/reports/income": reporte });
     renderScreen(<ReportsScreen />);
-    await waitFor(() => expect(screen.getByText("$12500")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("$12,500")).toBeTruthy());
+    fireEvent.press(screen.getByText("Mes"));
 
-    // Retrocede 12 veces: se cruza al menos un cambio de año.
-        const anioInicial = new Date().getFullYear();
-    for (let i = 0; i < 12; i++) pressIcon("chevron-back");
+    const anioInicial = new Date().getFullYear();
+    for (let i = 0; i < 12; i++) fireEvent.press(screen.getByLabelText("Mes anterior"));
 
     await waitFor(() =>
       expect(screen.queryByText(new RegExp(String(anioInicial - 1)))).toBeTruthy(),
@@ -79,20 +123,29 @@ describe("reporte de ingresos", () => {
   it("avanza de diciembre a enero del año siguiente", async () => {
     mockApi({ "/api/reports/income": reporte });
     renderScreen(<ReportsScreen />);
-    await waitFor(() => expect(screen.getByText("$12500")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("$12,500")).toBeTruthy());
+    fireEvent.press(screen.getByText("Mes"));
 
-        const anioInicial = new Date().getFullYear();
-    for (let i = 0; i < 12; i++) pressIcon("chevron-forward");
+    const anioInicial = new Date().getFullYear();
+    for (let i = 0; i < 12; i++) fireEvent.press(screen.getByLabelText("Mes siguiente"));
 
     await waitFor(() =>
       expect(screen.queryByText(new RegExp(String(anioInicial + 1)))).toBeTruthy(),
     );
   });
 
+  it("avisa cuando el periodo no tiene cobros", async () => {
+    mockApi({ "/api/reports/income": { total: 0, ownerNet: 0, facialistNet: 0, count: 0 } });
+    renderScreen(<ReportsScreen />);
+
+    await waitFor(() => expect(screen.getByText("Sin datos")).toBeTruthy());
+    expect(screen.getByText(/No hay cobros registrados en/)).toBeTruthy();
+  });
+
   it("cierra volviendo atrás", async () => {
     mockApi({ "/api/reports/income": reporte });
     renderScreen(<ReportsScreen />);
-    await waitFor(() => expect(screen.getByText("$12500")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("$12,500")).toBeTruthy());
 
     pressIcon("close");
 
@@ -103,7 +156,7 @@ describe("reporte de ingresos", () => {
     mockRouter.canGoBack.mockReturnValueOnce(false);
     mockApi({ "/api/reports/income": reporte });
     renderScreen(<ReportsScreen />);
-    await waitFor(() => expect(screen.getByText("$12500")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("$12,500")).toBeTruthy());
 
     pressIcon("close");
 

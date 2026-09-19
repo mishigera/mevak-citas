@@ -19,7 +19,7 @@ import { Screen, ScreenScroll } from "@/components/Screen";
 import { GlassPopover } from "@/components/glass";
 import { Entrar, PressableMotion, Stagger } from "@/components/motion";
 import { CargandoLista, EstadoVacio } from "@/components/Estados";
-import { apiRequest, getApiUrl, getAuthToken } from "@/lib/query-client";
+import { apiRequest, getApiUrl, getAuthToken, getErrorMessage } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import { useAuth } from "@/contexts/auth";
 import * as Haptics from "expo-haptics";
@@ -211,6 +211,31 @@ export default function AppointmentDetailScreen() {
     onError: (err: Error) => Alert.alert("Error", err.message),
   });
 
+  const anularPagoMutation = useMutation({
+    mutationFn: async (paymentId: string) => {
+      await apiRequest("DELETE", `/api/payments/${paymentId}`, undefined);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/appointments"] });
+      qc.invalidateQueries({ queryKey: ["/api/clients", appt?.clientId, "packages"] });
+      refetch();
+      setPaymentAmount("");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: Error) => Alert.alert("No se pudo anular", getErrorMessage(err, "No se pudo anular el pago")),
+  });
+
+  const confirmarAnulacion = (paymentId: string) => {
+    Alert.alert(
+      "Anular pago",
+      "El cobro se borra, la cita vuelve a \"Llegó\" y, si gastó una sesión de paquete, se devuelve.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Anular", style: "destructive", onPress: () => anularPagoMutation.mutate(paymentId) },
+      ],
+    );
+  };
+
   const markPaidMutation = useMutation({
     mutationFn: async (paymentId: string) => {
       await apiRequest("PATCH", `/api/payments/${paymentId}/facialist-paid`, { paid: true });
@@ -232,6 +257,20 @@ export default function AppointmentDetailScreen() {
     },
     onError: (err: Error) => Alert.alert("Error", err.message),
   });
+
+  /**
+   * Lo que suman los servicios marcados. Antes el monto era un campo vacío y había que
+   * sumar de cabeza teniendo los precios delante.
+   */
+  const totalServicios = (appt?.services || []).reduce(
+    (suma: number, s: any) => suma + (Number(s?.price) || 0),
+    0,
+  );
+
+  const abrirFormularioPago = () => {
+    if (!paymentAmount && totalServicios > 0) setPaymentAmount(String(totalServicios));
+    setShowPaymentForm(true);
+  };
 
   const handleReSchedule = () => {
     if (!appt) return;
@@ -563,6 +602,18 @@ export default function AppointmentDetailScreen() {
             <SectionCard title="Pago registrado">
               <InfoRow label="Método" value={METHOD_LABELS[appt.payment.method]} />
               <InfoRow label="Total" value={`$${appt.payment.totalAmount}`} />
+              {isOwner && (
+                <PressableMotion
+                  gesto="sutil"
+                  accessibilityLabel="Anular pago"
+                  style={styles.anularBtn}
+                  disabled={anularPagoMutation.isPending}
+                  onPress={() => confirmarAnulacion(appt.payment.id)}
+                >
+                  <Ionicons name="arrow-undo-outline" size={16} color={Colors.error} />
+                  <Text style={styles.anularBtnText}>Anular pago</Text>
+                </PressableMotion>
+              )}
               {appt.type === "FACIAL" && (
                 <>
                   <InfoRow label="Owner" value={`$${appt.payment.ownerNetAmount}`} />
@@ -593,7 +644,7 @@ export default function AppointmentDetailScreen() {
                   <PressableMotion
                     gesto="elevar"
                     style={styles.finishBtn}
-                    onPress={() => setShowPaymentForm(true)}
+                    onPress={abrirFormularioPago}
                   >
                     <Ionicons name="card-outline" size={18} color="#fff" />
                     <Text style={styles.finishBtnText}>Registrar pago y terminar</Text>
@@ -633,7 +684,13 @@ export default function AppointmentDetailScreen() {
                         keyboardType="numeric"
                         placeholder="0"
                         placeholderTextColor={Colors.textMuted}
+                        accessibilityLabel="Monto total"
                       />
+                      {totalServicios > 0 && (
+                        <Text style={styles.pistaTotal}>
+                          Los servicios elegidos suman ${totalServicios}
+                        </Text>
+                      )}
                     </>
                   )}
                   <View style={styles.editBtns}>
@@ -813,6 +870,20 @@ const styles = StyleSheet.create({
   pkgOptionMeta: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary },
   pkgProgress: { height: 6, backgroundColor: Colors.border, borderRadius: 3, overflow: "hidden" },
   pkgProgressFill: { height: 6, backgroundColor: Colors.secondary, borderRadius: 3 },
+  pistaTotal: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted, marginTop: 4 },
+  anularBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: Space.xs,
+    marginTop: Space.sm,
+    paddingVertical: Space.sm,
+    paddingHorizontal: Space.md,
+    borderRadius: Radius.control,
+    borderWidth: 1,
+    borderColor: Colors.error + "40",
+  },
+  anularBtnText: { fontFamily: "Nunito_700Bold", fontSize: 13, color: Colors.error },
   notesInput: { backgroundColor: Colors.background, borderRadius: 10, padding: 12, minHeight: 80, borderWidth: 1, borderColor: Colors.border, fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.text, textAlignVertical: "top" },
   notesText: { fontFamily: "Nunito_400Regular", fontSize: 14, color: Colors.textSecondary, lineHeight: 20 },
   editLink: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },

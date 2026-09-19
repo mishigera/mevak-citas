@@ -278,3 +278,203 @@ describe("pagos — validaciones e invariantes", () => {
     expect(res.status).toBe(401);
   });
 });
+
+/**
+ * Deuda §31 — el dinero de los paquetes no se registraba en ningún sitio, así que el
+ * reporte sumaba cero por todo el láser. Ahora vender es cobrar. ADR-0006.
+ */
+describe("venta de paquete", () => {
+  const vender = (app: Express, token: string, body: object) =>
+    request(app).post(`/api/clients/${CLIENT}/packages`)
+      .set("Authorization", `Bearer ${token}`).send(body);
+
+  const conCatalogo = () => setup({ packages: [aPackage({ id: "pk1", price: 6000, totalSessions: 6 })] });
+
+  it("registra un pago con el precio del catálogo", async () => {
+    const { app, storage, token } = await conCatalogo();
+    const res = await vender(app, token, { packageId: "pk1", method: "CASH" });
+
+    expect(res.status).toBe(201);
+    const pagos = storage.payments.snapshotValues();
+    expect(pagos).toHaveLength(1);
+    expect(pagos[0]).toMatchObject({
+      concept: "PAQUETE",
+      method: "CASH",
+      totalAmount: 6000,
+      ownerNetAmount: 6000,
+      facialistNetAmount: 0,
+      clientId: CLIENT,
+    });
+  });
+
+  it("el pago no cuelga de ninguna cita", async () => {
+    const { app, storage, token } = await conCatalogo();
+    await vender(app, token, { packageId: "pk1" });
+
+    expect(storage.payments.snapshotValues()[0].appointmentId).toBeUndefined();
+  });
+
+  it("apunta al paquete que se vendió", async () => {
+    const { app, storage, token } = await conCatalogo();
+    const res = await vender(app, token, { packageId: "pk1" });
+
+    expect(storage.payments.snapshotValues()[0].clientPackageId).toBe(res.body.id);
+  });
+
+  it("acepta un importe distinto al del catálogo", async () => {
+    const { app, storage, token } = await conCatalogo();
+    await vender(app, token, { packageId: "pk1", totalAmount: 5500 });
+
+    expect(storage.payments.snapshotValues()[0].totalAmount).toBe(5500);
+  });
+
+  it("sin método, asume efectivo", async () => {
+    const { app, storage, token } = await conCatalogo();
+    await vender(app, token, { packageId: "pk1" });
+
+    expect(storage.payments.snapshotValues()[0].method).toBe("CASH");
+  });
+
+  it("400 con un método que no existe", async () => {
+    const { app, token } = await conCatalogo();
+    expect((await vender(app, token, { packageId: "pk1", method: "TRUEQUE" })).status).toBe(400);
+  });
+
+  it("400 con un importe negativo", async () => {
+    const { app, token } = await conCatalogo();
+    expect((await vender(app, token, { packageId: "pk1", totalAmount: -1 })).status).toBe(400);
+  });
+
+  it("un paquete vendido y sin usar cuenta en el reporte del día", async () => {
+    const { app, token } = await conCatalogo();
+    await vender(app, token, { packageId: "pk1", method: "CARD" });
+
+    const hoy = new Date();
+    const clave = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(hoy.getDate()).padStart(2, "0")}`;
+    const res = await request(app).get(`/api/reports/income?date=${clave}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.body).toMatchObject({
+      total: 6000,
+      porConcepto: { PAQUETE: 6000, CITA: 0 },
+      porMetodo: { CARD: 6000, CASH: 0 },
+    });
+  });
+
+  it("la sesión consumida NO vuelve a sumar: el dinero se cuenta al vender", async () => {
+    const { app, storage, token } = await setup({
+      packages: [aPackage({ id: "pk1", price: 6000, totalSessions: 6 })],
+      appointments: [anAppointment({ id: "a1", clientId: CLIENT, type: "LASER" })],
+    });
+    const venta = await vender(app, token, { packageId: "pk1" });
+    await pay(app, token, "a1", { method: "INCLUDED", clientPackageId: venta.body.id });
+
+    const total = storage.payments.snapshotValues().reduce((s, p) => s + p.totalAmount, 0);
+    expect(total).toBe(6000);
+  });
+});
+
+/** Deuda §11 — un cobro mal capturado solo se arreglaba tocando la base a mano. */
+describe("anular un pago", () => {
+  const anular = (app: Express, token: string, paymentId: string) =>
+    request(app).delete(`/api/payments/${paymentId}`).set("Authorization", `Bearer ${token}`);
+
+  it("borra el cobro y devuelve la cita a ARRIVED", async () => {
+    const { app, storage, token } = await setup({
+      appointments: [anAppointment({ id: "a1", clientId: CLIENT, type: "FACIAL" })],
+    });
+    const pago = await pay(app, token, "a1", { method: "CASH", totalAmount: 800 });
+
+    const res = await anular(app, token, pago.body.id);
+
+    expect(res.status).toBe(200);
+    expect(storage.payments.get(pago.body.id)).toBeUndefined();
+    expect(storage.appointments.get("a1")).toMatchObject({ status: "ARRIVED" });
+  });
+
+  it("devuelve al paquete la sesión que se había consumido", async () => {
+    const { app, storage, token } = await setup({
+      packages: [aPackage({ id: "pk1", totalSessions: 6 })],
+      clientPackages: [aClientPackage({ id: "cp1", clientId: CLIENT, packageId: "pk1", totalSessions: 6, usedSessions: 0, remainingSessions: 6 })],
+      appointments: [anAppointment({ id: "a1", clientId: CLIENT, type: "LASER" })],
+    });
+    const pago = await pay(app, token, "a1", { method: "INCLUDED", clientPackageId: "cp1" });
+    expect(storage.clientPackages.get("cp1")).toMatchObject({ usedSessions: 1, remainingSessions: 5 });
+
+    await anular(app, token, pago.body.id);
+
+    expect(storage.clientPackages.get("cp1")).toMatchObject({ usedSessions: 0, remainingSessions: 6 });
+  });
+
+  it("un paquete agotado y luego anulado vuelve a estar activo", async () => {
+    const { app, storage, token } = await setup({
+      packages: [aPackage({ id: "pk1", totalSessions: 1 })],
+      clientPackages: [aClientPackage({ id: "cp1", clientId: CLIENT, packageId: "pk1", totalSessions: 1, usedSessions: 0, remainingSessions: 1 })],
+      appointments: [anAppointment({ id: "a1", clientId: CLIENT, type: "LASER" })],
+    });
+    const pago = await pay(app, token, "a1", { method: "INCLUDED", clientPackageId: "cp1" });
+    expect(storage.clientPackages.get("cp1")).toMatchObject({ status: "FINISHED" });
+
+    await anular(app, token, pago.body.id);
+
+    expect(storage.clientPackages.get("cp1")).toMatchObject({ status: "ACTIVE", remainingSessions: 1 });
+  });
+
+  it("después de anular se puede volver a cobrar, que es el objetivo", async () => {
+    const { app, token } = await setup({
+      appointments: [anAppointment({ id: "a1", clientId: CLIENT, type: "FACIAL" })],
+    });
+    const malo = await pay(app, token, "a1", { method: "CASH", totalAmount: 8000 });
+    await anular(app, token, malo.body.id);
+
+    const bueno = await pay(app, token, "a1", { method: "CASH", totalAmount: 800 });
+
+    expect(bueno.status).toBe(201);
+    expect(bueno.body.totalAmount).toBe(800);
+  });
+
+  it("409 si ya se liquidó a la facialista", async () => {
+    const { app, token } = await setup({
+      appointments: [anAppointment({ id: "a1", clientId: CLIENT, type: "FACIAL" })],
+    });
+    const pago = await pay(app, token, "a1", { method: "CASH", totalAmount: 800 });
+    await request(app).patch(`/api/payments/${pago.body.id}/facialist-paid`)
+      .set("Authorization", `Bearer ${token}`).send({ paid: true });
+
+    const res = await anular(app, token, pago.body.id);
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/ya liquidado/i);
+  });
+
+  it("anula una venta de paquete sin usar y borra el paquete", async () => {
+    const { app, storage, token } = await setup({ packages: [aPackage({ id: "pk1", price: 6000 })] });
+    const venta = await request(app).post(`/api/clients/${CLIENT}/packages`)
+      .set("Authorization", `Bearer ${token}`).send({ packageId: "pk1" });
+
+    const res = await anular(app, token, venta.body.payment.id);
+
+    expect(res.status).toBe(200);
+    expect(storage.clientPackages.get(venta.body.id)).toBeUndefined();
+  });
+
+  it("409 al anular una venta cuyo paquete ya tiene sesiones usadas", async () => {
+    const { app, token } = await setup({
+      packages: [aPackage({ id: "pk1", price: 6000, totalSessions: 6 })],
+      appointments: [anAppointment({ id: "a1", clientId: CLIENT, type: "LASER" })],
+    });
+    const venta = await request(app).post(`/api/clients/${CLIENT}/packages`)
+      .set("Authorization", `Bearer ${token}`).send({ packageId: "pk1" });
+    await pay(app, token, "a1", { method: "INCLUDED", clientPackageId: venta.body.id });
+
+    const res = await anular(app, token, venta.body.payment.id);
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/sesiones usadas/i);
+  });
+
+  it("404 si el pago no existe", async () => {
+    const { app, token } = await setup();
+    expect((await anular(app, token, "no-existe")).status).toBe(404);
+  });
+});

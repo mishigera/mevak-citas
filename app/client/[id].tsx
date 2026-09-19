@@ -102,6 +102,8 @@ export default function ClientDetailScreen() {
   const [clinicalEditing, setClinicalEditing] = useState(tabParam === "clinical" && canViewClinical);
   const [selectedLaserSvgKeys, setSelectedLaserSvgKeys] = useState<string[]>([]);
   const [selectedPackageTemplateId, setSelectedPackageTemplateId] = useState("");
+  // Vender un paquete es cobrar: sin el método, el dinero no entra en el corte de caja.
+  const [metodoPaquete, setMetodoPaquete] = useState<"CASH" | "CARD">("CASH");
 
   const { data: client, isLoading } = useQuery<any>({
     queryKey: ["/api/clients", id],
@@ -230,14 +232,18 @@ export default function ClientDetailScreen() {
   const linkPackageMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPackageTemplateId) throw new Error("Selecciona un paquete");
-      await apiRequest("POST", `/api/clients/${id}/packages`, { packageId: selectedPackageTemplateId });
+      await apiRequest("POST", `/api/clients/${id}/packages`, {
+        packageId: selectedPackageTemplateId,
+        method: metodoPaquete,
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/clients", id, "packages"] });
       qc.invalidateQueries({ queryKey: ["/api/appointments"] });
+      qc.invalidateQueries({ queryKey: ["/api/reports/income"] });
       setSelectedPackageTemplateId("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Paquete vinculado", "El paquete quedó registrado en el historial del cliente.");
+      Alert.alert("Paquete vendido", "Quedó registrado en el historial de la clienta y en el corte del día.");
     },
     onError: (err: Error) => Alert.alert("Error", err.message),
   });
@@ -367,7 +373,7 @@ export default function ClientDetailScreen() {
 
         {(role === "OWNER" || role === "RECEPTION") && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Vincular paquete comprado</Text>
+            <Text style={styles.cardTitle}>Vender paquete</Text>
             {packageCatalog.length === 0 ? (
               <Text style={styles.emptyText}>No hay paquetes activos para vincular.</Text>
             ) : (
@@ -392,6 +398,28 @@ export default function ClientDetailScreen() {
                     );
                   })}
                 </View>
+                <Text style={styles.metodoEtiqueta}>¿Cómo lo paga?</Text>
+                <View style={styles.metodoFila}>
+                  {([
+                    { valor: "CASH" as const, texto: "Efectivo", icono: "cash-outline" as const },
+                    { valor: "CARD" as const, texto: "Tarjeta", icono: "card-outline" as const },
+                  ]).map((opcion) => {
+                    const elegido = metodoPaquete === opcion.valor;
+                    return (
+                      <PressableMotion
+                        key={opcion.valor}
+                        gesto="sutil"
+                        accessibilityLabel={opcion.texto}
+                        accessibilityState={{ selected: elegido }}
+                        style={[styles.metodoBoton, elegido && styles.metodoBotonElegido]}
+                        onPress={() => setMetodoPaquete(opcion.valor)}
+                      >
+                        <Ionicons name={opcion.icono} size={16} color={elegido ? "#fff" : Colors.textSecondary} />
+                        <Text style={[styles.metodoTexto, elegido && { color: "#fff" }]}>{opcion.texto}</Text>
+                      </PressableMotion>
+                    );
+                  })}
+                </View>
                 <PressableMotion
                   gesto="elevar"
                   style={[styles.linkPackageBtn, (!selectedPackageTemplateId || linkPackageMutation.isPending) && { opacity: 0.5 }]}
@@ -404,7 +432,7 @@ export default function ClientDetailScreen() {
                   {linkPackageMutation.isPending ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Text style={styles.linkPackageBtnText}>Vincular paquete al cliente</Text>
+                    <Text style={styles.linkPackageBtnText}>Registrar venta del paquete</Text>
                   )}
                 </PressableMotion>
               </>
@@ -738,6 +766,14 @@ const styles = StyleSheet.create({
   progressFill: { height: 8, backgroundColor: Colors.secondary, borderRadius: 4 },
   packageUsageText: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary },
   progressDate: { fontFamily: "Nunito_400Regular", fontSize: 12, color: Colors.textMuted },
+  metodoEtiqueta: { fontFamily: "Nunito_600SemiBold", fontSize: 12, color: Colors.textSecondary, marginTop: 10 },
+  metodoFila: { flexDirection: "row", gap: 8, marginTop: 6 },
+  metodoBoton: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
+  },
+  metodoBotonElegido: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  metodoTexto: { fontFamily: "Nunito_600SemiBold", fontSize: 13, color: Colors.textSecondary },
   packageCatalogList: { gap: 8 },
   packageCatalogItem: { borderWidth: 2, borderColor: Colors.border, borderRadius: 12, padding: 12, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.background },
   packageCatalogItemSelected: { borderColor: Colors.secondary, backgroundColor: Colors.secondary + "12" },

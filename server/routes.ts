@@ -94,6 +94,16 @@ function validarIntervalo(inicio: unknown, fin: unknown): { start: number; end: 
   return { start, end };
 }
 
+/**
+ * El día local de un ISO con zona. El servidor corre con la `TZ` del centro (ADR-0004),
+ * así que `getFullYear/Month/Date` ya dan el día que la recepción llamaría "hoy".
+ */
+function diaLocalDe(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function seSolapan(aInicio: number, aFin: number, bInicio: unknown, bFin: unknown): boolean {
   const start = instante(bInicio);
   const end = instante(bFin);
@@ -270,15 +280,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(packages);
   });
 
+  /**
+   * Vender un paquete registra el cobro.
+   *
+   * Antes solo creaba el `ClientPackage`, así que el importe no entraba en ningún lado:
+   * el reporte sumaba cero por todo el láser, porque cada sesión se cobra luego como
+   * `INCLUDED` a 0. Deuda §31, ADR-0006.
+   */
   app.post("/api/clients/:id/packages", requireRole("OWNER", "RECEPTION"), (req, res) => {
     const clientId = paramId(req);
     const client = storage.clients.get(clientId);
     if (!client) return res.status(404).json({ message: "Cliente no encontrado" });
     const pkg = storage.packages.get(req.body.packageId);
     if (!pkg || !pkg.isActive) return res.status(404).json({ message: "Paquete no encontrado" });
+
+    const method = (req.body.method ?? "CASH") as PaymentMethod;
+    if (!["CASH", "CARD"].includes(method)) {
+      return res.status(400).json({ message: "Método de pago inválido" });
+    }
+    // Sin importe explícito vale el del catálogo, que es el caso normal; se permite
+    // otro por si se aplica un ajuste al vender.
+    const totalAmount = req.body.totalAmount === undefined ? pkg.price : Number(req.body.totalAmount);
+    if (!Number.isFinite(totalAmount) || totalAmount < 0) {
+      return res.status(400).json({ message: "Importe inválido" });
+    }
+
     const cp = { id: randomUUID(), clientId, packageId: pkg.id, totalSessions: pkg.totalSessions, usedSessions: 0, remainingSessions: pkg.totalSessions, startDate: new Date().toISOString(), status: "ACTIVE" as const };
     storage.clientPackages.set(cp.id, cp);
-    res.status(201).json(enrichClientPackage(cp));
+
+    const payment = {
+      id: randomUUID(),
+      clientId,
+      clientPackageId: cp.id,
+      concept: "PAQUETE" as const,
+      method,
+      totalAmount,
+      // Un paquete de láser es de la dueña entera; la facialista no entra en esto.
+      ownerNetAmount: totalAmount,
+      facialistNetAmount: 0,
+      facialistPaidFlag: false,
+      createdAt: new Date().toISOString(),
+    };
+    storage.payments.set(payment.id, payment);
+
+    res.status(201).json({ ...enrichClientPackage(cp), payment });
   });
 
   // SERVICES
@@ -470,7 +515,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     const total = resolvedMethod === "INCLUDED" ? 0 : Number(totalAmount) || 0;
     const isFacial = appt.type === "FACIAL";
-    const payment = { id: randomUUID(), appointmentId, method: resolvedMethod, totalAmount: total, ownerNetAmount: isFacial ? Math.floor(total / 2) : total, facialistNetAmount: isFacial ? Math.ceil(total / 2) : 0, facialistPaidFlag: false, createdAt: new Date().toISOString() };
+    const payment = { id: randomUUID(), appointmentId, clientId: appt.clientId, concept: "CITA" as const, method: resolvedMethod, totalAmount: total, ownerNetAmount: isFacial ? Math.floor(total / 2) : total, facialistNetAmount: isFacial ? Math.ceil(total / 2) : 0, facialistPaidFlag: false, createdAt: new Date().toISOString() };
     storage.payments.set(payment.id, payment);
     appt.status = "DONE";
     storage.appointments.set(appt.id, appt);
@@ -504,6 +549,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(201).json(payment);
   });
 
+  /**
+   * Anula un pago: devuelve la sesión al paquete si la consumió y reabre la cita.
+   *
+   * Antes no existía y registrar el pago cerraba la cita sin vuelta atrás, así que un
+   * cobro mal capturado solo se arreglaba tocando la base a mano. Deuda §11.
+   */
+  app.delete("/api/payments/:id", requireRole("OWNER"), (req, res) => {
+    const payment = storage.payments.get(paramId(req));
+    if (!payment) return res.status(404).json({ message: "Not found" });
+    if (payment.facialistPaidFlag) {
+      return res.status(409).json({ message: "No se puede anular un pago ya liquidado a la facialista" });
+    }
+
+    // Una venta de paquete solo se anula si no se ha gastado ninguna sesión: si ya se
+    // aplicó, devolver el dinero deja un paquete a medias que nadie pagó.
+    if (payment.concept === "PAQUETE" && payment.clientPackageId) {
+      const cp = storage.clientPackages.get(payment.clientPackageId);
+      if (cp && cp.usedSessions > 0) {
+        return res.status(409).json({ message: "El paquete ya tiene sesiones usadas" });
+      }
+      if (cp) storage.clientPackages.delete(cp.id);
+    }
+
+    if (payment.appointmentId) {
+      const sesion = Array.from(storage.laserSessions.values()).find((s) => s.appointmentId === payment.appointmentId);
+      // Devolver la sesión consumida al paquete.
+      if (sesion?.clientPackageId) {
+        const cp = storage.clientPackages.get(sesion.clientPackageId);
+        if (cp) {
+          cp.usedSessions = Math.max(cp.usedSessions - 1, 0);
+          cp.remainingSessions = Math.max(cp.totalSessions - cp.usedSessions, 0);
+          if (cp.remainingSessions > 0) cp.status = "ACTIVE";
+          storage.clientPackages.set(cp.id, cp);
+        }
+        sesion.clientPackageId = undefined;
+        sesion.sessionNumber = undefined;
+        storage.laserSessions.set(sesion.id, sesion);
+      }
+      // La cita vuelve a "llegó": la clienta estuvo, lo que falta es cobrarle bien.
+      const appt = storage.appointments.get(payment.appointmentId);
+      if (appt) {
+        appt.status = "ARRIVED";
+        storage.appointments.set(appt.id, appt);
+      }
+    }
+
+    storage.payments.delete(payment.id);
+    res.json({ ok: true });
+  });
+
   app.patch("/api/payments/:id/facialist-paid", requireRole("OWNER"), (req, res) => {
     const payment = storage.payments.get(paramId(req));
     if (!payment) return res.status(404).json({ message: "Not found" });
@@ -516,22 +611,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const pending = Array.from(storage.payments.values())
       .filter((p) => !p.facialistPaidFlag && p.facialistNetAmount > 0)
       .map((p) => {
-        const appt = storage.appointments.get(p.appointmentId);
+        const appt = p.appointmentId ? storage.appointments.get(p.appointmentId) : null;
         const staff = appt ? storage.users.get(appt.staffId) : null;
-        const client = appt ? storage.clients.get(appt.clientId) : null;
+        const client = appt ? storage.clients.get(appt.clientId) : p.clientId ? storage.clients.get(p.clientId) : null;
         return { ...p, appointment: appt, staff, client };
       });
     res.json(pending);
   });
 
+  /**
+   * Ingresos de un mes o de un día.
+   *
+   * Desglosa por método y por concepto porque el corte de caja al cerrar necesita las
+   * dos cosas: cuánto hay que tener en el cajón (efectivo) y de dónde vino.
+   *
+   * El día se compara **en local**: `createdAt` es un ISO con `Z`, y su prefijo es el
+   * día en UTC, que después de las 18:00 en México ya es el siguiente (ADR-0004).
+   */
   app.get("/api/reports/income", requireRole("OWNER"), (req, res) => {
-    const { month, year } = req.query;
+    const { month, year, date } = req.query;
     let payments = Array.from(storage.payments.values());
-    if (month && year) { payments = payments.filter((p) => { const d = new Date(p.createdAt); return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year); }); }
-    const total = payments.reduce((s, p) => s + p.totalAmount, 0);
-    const ownerNet = payments.reduce((s, p) => s + p.ownerNetAmount, 0);
-    const facialistNet = payments.reduce((s, p) => s + p.facialistNetAmount, 0);
-    res.json({ total, ownerNet, facialistNet, count: payments.length });
+
+    if (date) {
+      payments = payments.filter((p) => diaLocalDe(p.createdAt) === date);
+    } else if (month && year) {
+      payments = payments.filter((p) => {
+        const d = new Date(p.createdAt);
+        return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year);
+      });
+    }
+
+    const suma = (lista: typeof payments, campo: "totalAmount" | "ownerNetAmount" | "facialistNetAmount") =>
+      lista.reduce((acc, p) => acc + p[campo], 0);
+    const porMetodo = (metodo: PaymentMethod) => suma(payments.filter((p) => p.method === metodo), "totalAmount");
+    const porConcepto = (concepto: "CITA" | "PAQUETE") => suma(payments.filter((p) => p.concept === concepto), "totalAmount");
+
+    res.json({
+      total: suma(payments, "totalAmount"),
+      ownerNet: suma(payments, "ownerNetAmount"),
+      facialistNet: suma(payments, "facialistNetAmount"),
+      count: payments.length,
+      porMetodo: { CASH: porMetodo("CASH"), CARD: porMetodo("CARD"), INCLUDED: porMetodo("INCLUDED") },
+      porConcepto: { CITA: porConcepto("CITA"), PAQUETE: porConcepto("PAQUETE") },
+      pendienteFacialista: suma(payments.filter((p) => !p.facialistPaidFlag), "facialistNetAmount"),
+    });
   });
 
   // AVAILABILITY BLOCKS

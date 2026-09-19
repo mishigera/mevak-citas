@@ -114,9 +114,17 @@ export interface LaserSession {
   notes?: string;
 }
 
+export type PaymentConcept = "CITA" | "PAQUETE";
+
 export interface Payment {
   id: string;
-  appointmentId: string;
+  /** Ausente en una venta de paquete: ese dinero no cuelga de ninguna cita (ADR-0006). */
+  appointmentId?: string;
+  /** Quién pagó. En los cobros de cita sale de la cita; en las ventas, de la URL. */
+  clientId?: string;
+  concept: PaymentConcept;
+  /** El paquete vendido, cuando `concept` es `PAQUETE`. */
+  clientPackageId?: string;
   method: PaymentMethod;
   totalAmount: number;
   ownerNetAmount: number;
@@ -290,8 +298,27 @@ class DbStorage {
     if (migrados) console.log(`Migrados ${migrados} usuarios de ADMIN a OWNER (ADR-0005)`);
   }
 
+  /**
+   * Los pagos anteriores a ADR-0006 no tenían `concept` ni `clientId`: todos eran
+   * cobros de cita. Idempotente.
+   */
+  private migrarConceptoDePagos() {
+    let migrados = 0;
+    this.payments.forEach((payment) => {
+      if (payment.concept) return;
+      payment.concept = "CITA";
+      if (!payment.clientId && payment.appointmentId) {
+        payment.clientId = this.appointments.get(payment.appointmentId)?.clientId;
+      }
+      this.payments.set(payment.id, payment);
+      migrados += 1;
+    });
+    if (migrados) console.log(`Migrados ${migrados} pagos a concept: "CITA" (ADR-0006)`);
+  }
+
   private async seedIfNeeded() {
     this.migrarAdminAOwner();
+    this.migrarConceptoDePagos();
 
     if (!this.users.size) {
       const defaultAdminEmail = process.env.ADMIN_EMAIL || "admin@mevakbeautycenter.com";

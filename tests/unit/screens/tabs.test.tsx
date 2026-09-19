@@ -144,7 +144,7 @@ describe("pantalla Más", () => {
 
       expect(screen.getByText("Bloqueos")).toBeTruthy();
       expect(screen.getByText("Pagos pendientes facialistas")).toBeTruthy();
-      expect(screen.getByText("Reporte de ingresos")).toBeTruthy();
+      expect(screen.getByText("Corte e ingresos")).toBeTruthy();
       expect(screen.getByText("Servicios")).toBeTruthy();
       expect(screen.getByText("Paquetes")).toBeTruthy();
       expect(screen.getByText("Usuarios")).toBeTruthy();
@@ -156,7 +156,7 @@ describe("pantalla Más", () => {
 
       expect(screen.getByText("Bloqueos")).toBeTruthy();
       expect(screen.queryByText("Pagos pendientes facialistas")).toBeNull();
-      expect(screen.queryByText("Reporte de ingresos")).toBeNull();
+      expect(screen.queryByText("Corte e ingresos")).toBeNull();
       expect(screen.queryByText("Servicios")).toBeNull();
       expect(screen.queryByText("Usuarios")).toBeNull();
     });
@@ -166,7 +166,7 @@ describe("pantalla Más", () => {
 
       expect(screen.getByText("Bloqueos")).toBeTruthy();
       expect(screen.queryByText("Pagos pendientes facialistas")).toBeNull();
-      expect(screen.queryByText("Reporte de ingresos")).toBeNull();
+      expect(screen.queryByText("Corte e ingresos")).toBeNull();
     });
   });
 
@@ -174,7 +174,7 @@ describe("pantalla Más", () => {
     it.each([
       ["Bloqueos", "/blocks"],
       ["Pagos pendientes facialistas", "/admin/payments"],
-      ["Reporte de ingresos", "/admin/reports"],
+      ["Corte e ingresos", "/admin/reports"],
       ["Servicios", "/admin/services"],
       ["Paquetes", "/admin/packages"],
       ["Usuarios", "/admin/users"],
